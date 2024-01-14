@@ -1,0 +1,6 @@
+beir
+scipy
+langchain
+sentence_transformers
+datasets
+spacy
