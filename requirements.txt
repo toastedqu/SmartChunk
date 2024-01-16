@@ -4,3 +4,5 @@ langchain
 sentence_transformers
 datasets
 spacy
+matplotlib
+plotnine

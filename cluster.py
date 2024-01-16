@@ -49,7 +49,7 @@ def linkage_expand_cluster(cluster_id: int, linkage_matrix: np.ndarray, len_embs
 
 
 # return the leaves in the largest cluster that contains cluster_id and has at most (<=) k leaves
-def linkage_nearest_k_neighborhood(cluster_id: int, linkage_matrix: np.ndarray, len_embs: int, linkage_parents: typing.Dict[int, int], linkage_size: typing.Dict[int, int], k=4) -> typing.Set[int]:
+def linkage_nearest_k_neighborhood(cluster_id: int, linkage_matrix: np.ndarray, len_embs: int, linkage_parents: typing.Dict[int, int], linkage_size: typing.Dict[int, int], k: int = 4) -> typing.Set[int]:
     if k <= 0:
         return set()
     if k == 1:
@@ -70,7 +70,7 @@ def linkage_nearest_k_neighborhood(cluster_id: int, linkage_matrix: np.ndarray, 
 
 
 # return the balanced split of (at most) k clusters
-def linkage_k_split(linkage_matrix: np.ndarray, len_embs: int, linkage_size: typing.Dict[int, int], k=4, cluster_id=-1) -> typing.Set[int]:
+def linkage_k_split(linkage_matrix: np.ndarray, len_embs: int, linkage_size: typing.Dict[int, int], k: int = 4, cluster_id: int = -1) -> typing.Set[int]:
     if cluster_id == -1:  # root
         cluster_id = len(linkage_matrix) + len_embs - 1
     if k == 1:
