@@ -31,7 +31,7 @@ qrels = dataloader.read_qrels(data_path, split="test")
 corpus_len = len(corpus)
 
 # chunk the documents into 4-splits
-corpus_chunked = corpus.map(functools.partial(chunker.cluster_chunker, k=4, continuity=True), batched=True, batch_size=1)
+corpus_chunked = corpus.map(functools.partial(chunker.beir, chunker.cluster_chunker, k=4, continuity=True), batched=True, batch_size=1)
 
 # filter out the original documents, only keep the split documents
 corpus_split: datasets.Dataset = corpus_chunked.filter(lambda row: row["origin"] != "corpus")

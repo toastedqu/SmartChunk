@@ -6,3 +6,5 @@ datasets
 spacy
 matplotlib
 plotnine
+evaluate
+protobuf

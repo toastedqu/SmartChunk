@@ -9,7 +9,7 @@ embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/msmarco-dis
 nlp = spacy.load("en_core_web_sm")
 
 
-def __metric__(A: np.ndarray, B: np.ndarray) -> float:
+def __sim_pos_metric__(A: np.ndarray, B: np.ndarray) -> float:
     A_pos = int(A[0])
     B_pos = int(B[0])
     pos_dist = abs(A_pos - B_pos)  # integer >= 1
@@ -30,21 +30,16 @@ def __plt__(linkage_matrix):
 
 # Use a cluster as a chunk, by clustering sentences in the document, then split the document into k chunks
 # This chunker does not guarantee but consider the continuity of sentences, but it only preserves the order
-def cluster_chunker(row, k=4, continuity=True):
-    doc = row["text"][0]
-    title = row["title"][0]
-    id = row["id"][0]
-    texts = [doc]
-    titles = [title]
-    origins = [row["origin"][0]]
-    ids = [id]
+def cluster_chunker(doc: str, doc_id: int, k=4, continuity=True):
+    texts = []
+    ids = []
     sents = [sent.text for sent in nlp(doc).sents]
     candidate_emb = embeddings.embed_documents(sents)
     if continuity:
         for i, emb in enumerate(candidate_emb):
             # append i to the beginning of the embedding
             candidate_emb[i] = np.append([i], emb)
-        linkage_matrix = linkage(candidate_emb, method="single", metric=__metric__)
+        linkage_matrix = linkage(candidate_emb, method="single", metric=__sim_pos_metric__)
     else:
         linkage_matrix = linkage(candidate_emb, method="single", metric="cosine")
     # __plt__(linkage_matrix)
@@ -57,42 +52,66 @@ def cluster_chunker(row, k=4, continuity=True):
         leaf_ids = sorted(list(leaf_ids))
         cluster = [sents[int(i)] for i in leaf_ids]
         texts.append(" ".join(cluster))
-        titles.append(title)
-        origins.append("cs" + str(row["id"]))  # cs = corpus split
-        ids.append("{}s{}".format(id, int(cluster_id)))  # s = split
-    return {"text": texts, "title": titles, "origin": origins, "id": ids}
+        ids.append("{}s{}".format(doc_id, int(cluster_id)))  # s = split
+    return texts, ids
 
 
 # Use a cluster as a chunk, but guarantee every chunk contains at least k sentences
-def sent_cluster_chunker(row, k=4, continuity=True):
+def sent_cluster_chunker(doc: str, doc_id: int, k=4, continuity=True):
     raise NotImplementedError()
 
 
 # Simple chunker that every chunk contains k consecutive sentences
-def sent_cont_chunker(row, k=1):
-    doc = row["text"][0]
-    title = row["title"][0]
-    id = row["id"][0]
-    texts = [doc]
-    titles = [title]
-    origins = [row["origin"][0]]
-    ids = [id]
+def sent_cont_chunker(doc: str, doc_id: int, k=1):
+    texts = []
+    ids = []
     sents = [sent.text for sent in nlp(doc).sents]
     buffer = ""
     for sid, sent in enumerate(sents):
         if sid % k == k - 1:
             texts.append(buffer + " " + sent)
-            titles.append(title)
-            origins.append("cs" + str(row["id"]))  # cs = corpus split
             ids.append("{}s{}".format(id, int(sid)))  # s = split
             buffer = ""
         else:
             buffer = buffer + " " + sent if buffer != "" else sent
     if buffer != "":  # add the last sentence
         texts.append(buffer)
-        titles.append(title)
-        origins.append("cs" + str(row["id"]))
-        ids.append("{}s{}".format(id, len(sents) - 1))
+        ids.append("{}s{}".format(doc_id, len(sents) - 1))
+    return texts, ids
+
+
+# Make every k words a chunk, also called Passage
+def arbitrary_chunker(doc: str, doc_id: int, k=100):
+    texts = []
+    ids = []
+    words = doc.split(" ")
+    buffer = ""
+    for wid, word in enumerate(words):
+        if wid % k == k - 1:
+            texts.append(buffer + " " + word)
+            ids.append("{}s{}".format(id, int(wid)))  # s = split
+            buffer = ""
+        else:
+            buffer = buffer + " " + word if buffer != "" else word
+    if buffer != "":  # add the last passage
+        texts.append(buffer)
+        ids.append("{}s{}".format(doc_id, len(words) - 1))
+    return texts, ids
+
+
+def beir(chunker, row, **kwargs):
+    doc = row["text"][0]
+    title = row["title"][0]
+    doc_id = row["id"][0]
+    texts = [doc]
+    titles = [title]
+    origins = [row["origin"][0]]
+    ids = [doc_id]
+    texts_append, ids_append = chunker(doc, doc_id, **kwargs)
+    texts.extend(texts_append)
+    ids.extend(ids_append)
+    titles.extend([title] * len(texts_append))
+    origins.extend(["cs" + str(row["id"])] * len(texts_append))  # cs = corpus split
     return {"text": texts, "title": titles, "origin": origins, "id": ids}
 
 
@@ -103,7 +122,7 @@ if __name__ == "__main__":
     #     "id": ["1"],
     #     "origin": ["corpus"]
     # }, k=4))
-    print(cluster_chunker({
+    print(cluster_chunker_beir({
         "text": [
             "Baron Augustin-Louis Cauchy was a French mathematician, engineer, and physicist who made pioneering contributions to several branches of mathematics, including mathematical analysis and continuum mechanics. He was one of the first to state and rigorously prove theorems of calculus, rejecting the heuristic principle of the generality of algebra of earlier authors. He (nearly) single-handedly founded complex analysis and the study of permutation groups in abstract algebra. A profound mathematician, Cauchy had a great influence over his contemporaries and successors; Hans Freudenthal stated: \"More concepts and theorems have been named for Cauchy than for any other mathematician (in elasticity alone there are sixteen concepts and theorems named for Cauchy).\" Cauchy was a prolific writer; he wrote approximately eight hundred research articles and five complete textbooks on a variety of topics in the fields of mathematics and mathematical physics. \
                 Leonhard Euler was a Swiss mathematician, physicist, astronomer, geographer, logician, and engineer who founded the studies of graph theory and topology and made pioneering and influential discoveries in many other branches of mathematics such as analytic number theory, complex analysis, and infinitesimal calculus. He introduced much of modern mathematical terminology and notation, including the notion of a mathematical function. He is also known for his work in mechanics, fluid dynamics, optics, astronomy, and music theory. Euler is held to be one of the greatest mathematicians in history and the greatest of the 18th century. Several great mathematicians who produced their work after Euler's death have recognised his importance in the field as shown by quotes attributed to many of them: Pierre-Simon Laplace expressed Euler's influence on mathematics by stating, \"Read Euler, read Euler, he is the master of us all.\" Carl Friedrich Gauss wrote: \"The study of Euler's works will remain the best school for the different fields of mathematics, and nothing else can replace it.\" Euler is also widely considered to be the most prolific; his 866 publications as well as his correspondences are being collected in the Opera Omnia Leonhard Euler which, when completed, will consist of 81 quarto volumes. He spent most of his adult life in Saint Petersburg, Russia, and in Berlin, then the capital of Prussia. \
