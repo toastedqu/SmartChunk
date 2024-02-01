@@ -37,12 +37,12 @@ def linkage_info(linkage_matrix: np.ndarray, len_embs: int, filter: int = 0) -> 
 
 
 # return the leaves in the cluster with cluster_id
-def linkage_expand_cluster(cluster_id: int, linkage_matrix: np.ndarray, len_embs: int, linkage_parents: typing.Dict[int, int]) -> typing.Set[int]:
+def linkage_expand_cluster(cluster_id: int, linkage_matrix: np.ndarray, len_embs: int) -> typing.Set[int]:
     if cluster_id >= len_embs:
         # expand cluster
         left = linkage_matrix[int(cluster_id) - len_embs][0]
         right = linkage_matrix[int(cluster_id) - len_embs][1]
-        return linkage_expand_cluster(left, linkage_matrix, len_embs, linkage_parents).union(linkage_expand_cluster(right, linkage_matrix, len_embs, linkage_parents))
+        return linkage_expand_cluster(left, linkage_matrix, len_embs).union(linkage_expand_cluster(right, linkage_matrix, len_embs))
     else:
         # cluster is a leaf
         return set([cluster_id])
@@ -66,7 +66,7 @@ def linkage_nearest_k_neighborhood(cluster_id: int, linkage_matrix: np.ndarray, 
             break
     # now, centroid is the smallest cluster that contains cluster_id and has more than (>) k leaves
     # prev_centroid is the largest cluster that contains cluster_id and has at most (<=) k leaves
-    return linkage_expand_cluster(prev_centroid, linkage_matrix, len_embs, linkage_parents)
+    return linkage_expand_cluster(prev_centroid, linkage_matrix, len_embs)
 
 
 # return the balanced split of (at most) k clusters
@@ -106,3 +106,32 @@ def linkage_k_split(linkage_matrix: np.ndarray, len_embs: int, linkage_size: typ
     left_cluster = linkage_k_split(linkage_matrix, len_embs, linkage_size, left_cluster_k, left)
     right_cluster = linkage_k_split(linkage_matrix, len_embs, linkage_size, right_cluster_k, right)
     return left_cluster.union(right_cluster)
+
+
+# return the balanced split containing at least k elements each
+def linkage_k_preserve(linkage_matrix: np.ndarray, len_embs: int, linkage_size: typing.Dict[int, int], k: int = 4, cluster_id: int = -1) -> typing.Set[int]:
+    if cluster_id == -1:  # root
+        cluster_id = len(linkage_matrix) + len_embs - 1
+    if k == 1:
+        return set([cluster_id])
+    if k <= 0:
+        return set()
+    if cluster_id < len_embs:  # leaf but k > 1
+        raise ValueError("k must be 1 for leaf clusters")
+
+    left = linkage_matrix[int(cluster_id) - len_embs][0]
+    right = linkage_matrix[int(cluster_id) - len_embs][1]
+    left_size = linkage_size[left]
+    right_size = linkage_size[right]
+
+    # keep left be the larger cluster
+    if right_size > left_size:
+        left, right = right, left
+        left_size, right_size = right_size, left_size
+
+    if right_size < k:  # one side has less than k elements, select all elements that the cluster contains >= k elements
+        return set([cluster_id])
+    else:  # both sides have at least k elements, continue to split
+        left_cluster = linkage_k_preserve(linkage_matrix, len_embs, linkage_size, k, left)
+        right_cluster = linkage_k_preserve(linkage_matrix, len_embs, linkage_size, k, right)
+        return left_cluster.union(right_cluster)

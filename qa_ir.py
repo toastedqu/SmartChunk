@@ -13,7 +13,7 @@ dataset.shuffle()
 dataset = dataset.select(range(10000))
 
 dataloader.qair_init()  # initialize the records for the chunker
-dataset.map(functools.partial(dataloader.qair_process, chunker.cluster_chunker, k=4, continuity=True), batched=True, batch_size=1)
+dataset.map(functools.partial(dataloader.qair_process, chunker.cluster_chunker, k=3, mode="k-preserve"), batched=True, batch_size=1)
 dataset_chunked = datasets.Dataset.from_dict(dataloader.corpus_dict_qair)
 corpus_split = dataset_chunked.filter(lambda row: row["type"] == "context_split")
 queries = dataset_chunked.filter(lambda row: row["type"] == "question")
