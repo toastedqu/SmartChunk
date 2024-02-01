@@ -34,6 +34,8 @@ def cluster_chunker(doc: str, doc_id: int, k=4, continuity=True):
     texts = []
     ids = []
     sents = [sent.text for sent in nlp(doc).sents]
+    if len(sents) == 1:
+        return [doc], [doc_id + "s0"]  # s = split
     candidate_emb = embeddings.embed_documents(sents)
     if continuity:
         for i, emb in enumerate(candidate_emb):
@@ -99,22 +101,6 @@ def arbitrary_chunker(doc: str, doc_id: int, k=100):
     return texts, ids
 
 
-def beir(chunker, row, **kwargs):
-    doc = row["text"][0]
-    title = row["title"][0]
-    doc_id = row["id"][0]
-    texts = [doc]
-    titles = [title]
-    origins = [row["origin"][0]]
-    ids = [doc_id]
-    texts_append, ids_append = chunker(doc, doc_id, **kwargs)
-    texts.extend(texts_append)
-    ids.extend(ids_append)
-    titles.extend([title] * len(texts_append))
-    origins.extend(["cs" + str(row["id"])] * len(texts_append))  # cs = corpus split
-    return {"text": texts, "title": titles, "origin": origins, "id": ids}
-
-
 if __name__ == "__main__":
     # print(cluster_chunker({
     #     "text": ["Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do: once or twice she had peeped into the book her sister was reading, but it had no pictures or conversations in it, “and what is the use of a book,” thought Alice “without pictures or conversations?”\n So she was considering in her own mind (as well as she could, for the hot day made her feel very sleepy and stupid), whether the pleasure of making a daisy-chain would be worth the trouble of getting up and picking the daisies, when suddenly a White Rabbit with pink eyes ran close by her.\n There was nothing so very remarkable in that; nor did Alice think it so very much out of the way to hear the Rabbit say to itself, “Oh dear! Oh dear! I shall be late!” (when she thought it over afterwards, it occurred to her that she ought to have wondered at this, but at the time it all seemed quite natural); but when the Rabbit actually took a watch out of its waistcoat-pocket, and looked at it, and then hurried on, Alice started to her feet, for it flashed across her mind that she had never before seen a rabbit with either a waistcoat-pocket, or a watch to take out of it, and burning with curiosity, she ran across the field after it, and fortunately was just in time to see it pop down a large rabbit-hole under the hedge.\n In another moment down went Alice after it, never once considering how in the world she was to get out again.\n The rabbit-hole went straight on like a tunnel for some way, and then dipped suddenly down, so suddenly that Alice had not a moment to think about stopping herself before she found herself falling down a very deep well."],
@@ -122,13 +108,8 @@ if __name__ == "__main__":
     #     "id": ["1"],
     #     "origin": ["corpus"]
     # }, k=4))
-    print(cluster_chunker_beir({
-        "text": [
-            "Baron Augustin-Louis Cauchy was a French mathematician, engineer, and physicist who made pioneering contributions to several branches of mathematics, including mathematical analysis and continuum mechanics. He was one of the first to state and rigorously prove theorems of calculus, rejecting the heuristic principle of the generality of algebra of earlier authors. He (nearly) single-handedly founded complex analysis and the study of permutation groups in abstract algebra. A profound mathematician, Cauchy had a great influence over his contemporaries and successors; Hans Freudenthal stated: \"More concepts and theorems have been named for Cauchy than for any other mathematician (in elasticity alone there are sixteen concepts and theorems named for Cauchy).\" Cauchy was a prolific writer; he wrote approximately eight hundred research articles and five complete textbooks on a variety of topics in the fields of mathematics and mathematical physics. \
+    print(cluster_chunker(
+        doc="Baron Augustin-Louis Cauchy was a French mathematician, engineer, and physicist who made pioneering contributions to several branches of mathematics, including mathematical analysis and continuum mechanics. He was one of the first to state and rigorously prove theorems of calculus, rejecting the heuristic principle of the generality of algebra of earlier authors. He (nearly) single-handedly founded complex analysis and the study of permutation groups in abstract algebra. A profound mathematician, Cauchy had a great influence over his contemporaries and successors; Hans Freudenthal stated: \"More concepts and theorems have been named for Cauchy than for any other mathematician (in elasticity alone there are sixteen concepts and theorems named for Cauchy).\" Cauchy was a prolific writer; he wrote approximately eight hundred research articles and five complete textbooks on a variety of topics in the fields of mathematics and mathematical physics. \
                 Leonhard Euler was a Swiss mathematician, physicist, astronomer, geographer, logician, and engineer who founded the studies of graph theory and topology and made pioneering and influential discoveries in many other branches of mathematics such as analytic number theory, complex analysis, and infinitesimal calculus. He introduced much of modern mathematical terminology and notation, including the notion of a mathematical function. He is also known for his work in mechanics, fluid dynamics, optics, astronomy, and music theory. Euler is held to be one of the greatest mathematicians in history and the greatest of the 18th century. Several great mathematicians who produced their work after Euler's death have recognised his importance in the field as shown by quotes attributed to many of them: Pierre-Simon Laplace expressed Euler's influence on mathematics by stating, \"Read Euler, read Euler, he is the master of us all.\" Carl Friedrich Gauss wrote: \"The study of Euler's works will remain the best school for the different fields of mathematics, and nothing else can replace it.\" Euler is also widely considered to be the most prolific; his 866 publications as well as his correspondences are being collected in the Opera Omnia Leonhard Euler which, when completed, will consist of 81 quarto volumes. He spent most of his adult life in Saint Petersburg, Russia, and in Berlin, then the capital of Prussia. \
-                David Hilbert was a German mathematician and one of the most influential mathematicians of the 19th and early 20th centuries. Hilbert discovered and developed a broad range of fundamental ideas including invariant theory, the calculus of variations, commutative algebra, algebraic number theory, the foundations of geometry, spectral theory of operators and its application to integral equations, mathematical physics, and the foundations of mathematics (particularly proof theory). Hilbert adopted and defended Georg Cantor's set theory and transfinite numbers. In 1900, he presented a collection of problems that set a course for mathematical research of the 20th century. Hilbert and his students contributed to establishing rigor and developed important tools used in modern mathematical physics. Hilbert was one of the founders of proof theory and mathematical logic."
-        ],
-        "title": ["Mathematicians"],
-        "id": ["1"],
-        "origin": ["corpus"]
-    }, k=3))
+                David Hilbert was a German mathematician and one of the most influential mathematicians of the 19th and early 20th centuries. Hilbert discovered and developed a broad range of fundamental ideas including invariant theory, the calculus of variations, commutative algebra, algebraic number theory, the foundations of geometry, spectral theory of operators and its application to integral equations, mathematical physics, and the foundations of mathematics (particularly proof theory). Hilbert adopted and defended Georg Cantor's set theory and transfinite numbers. In 1900, he presented a collection of problems that set a course for mathematical research of the 20th century. Hilbert and his students contributed to establishing rigor and developed important tools used in modern mathematical physics. Hilbert was one of the founders of proof theory and mathematical logic.",
+        doc_id=0, k=3))

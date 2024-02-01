@@ -67,7 +67,7 @@ def read_qrels(data_folder: str, split: typing.Optional[str] = None, num_proc = 
 
 # convert qrels to BEIR dict
 def convert_qrels(qrels: datasets.Dataset):
-    return {row["doc_id"]: {row["query_id"]: row["score"]} for row in qrels.to_list()}
+    return {row["query_id"]: {row["doc_id"]: row["score"]} for row in qrels.to_list()}
 
 
 # randomly sample a dataset using qrels for n samples
@@ -81,3 +81,88 @@ def sample(corpus: datasets.Dataset, queries: datasets.Dataset, qrels: datasets.
     corpus = corpus.filter(lambda row: row["id"] in doc_ids, desc="Filtering corpus", num_proc=num_proc)
     queries = queries.filter(lambda row: row["id"] in query_ids, desc="Filtering queries", num_proc=num_proc)
     return corpus, queries, qrels
+
+
+def beir_process(chunker, row, **kwargs):
+    doc = row["text"][0]
+    title = row["title"][0]
+    doc_id = row["id"][0]
+    texts = [doc]
+    titles = [title]
+    origins = [row["origin"][0]]
+    ids = [doc_id]
+    texts_append, ids_append = chunker(doc, doc_id, **kwargs)
+    texts.extend(texts_append)
+    ids.extend(ids_append)
+    titles.extend([title] * len(texts_append))
+    origins.extend(["cs" + str(row["id"])] * len(texts_append))  # cs = corpus split
+    return {"text": texts, "title": titles, "origin": origins, "id": ids}
+
+
+qrels_qair = {}
+corpus_dict_qair = {
+    "text": [],
+    "title": [],
+    "type": [],
+    "origin": [],
+    "id": []
+}
+
+def qair_init():
+    global qrels_qair, corpus_dict_qair
+    qrels_qair = {}
+    corpus_dict_qair = {
+        "text": [],
+        "title": [],
+        "type": [],
+        "origin": [],
+        "id": []
+    }
+
+def qair_process(chunker, row, **kwargs):
+    row_id = row["id"][0]
+    title = row["title"][0]
+    context = row["context"][0]
+    question = row["question"][0]
+    answers = row["answers"][0]
+    texts = [question, context]
+    texts.extend(answers)
+    titles = [title] * (2 + len(answers))
+    types = ["question"] + ["context"] + ["answer"] * len(answers)
+    origins = ["corpus"] * (2 + len(answers))
+    ids = [row_id + "q"] + [row_id + "c"] + [row_id + "a" + str(i) for i in range(len(answers))]
+    chunks_append, ids_append = chunker(context, row_id + "c", **kwargs)  # c = context
+
+    # # qrels scoring for the chunks for retrieval
+    # for chunk, chunk_id in zip(chunks_append, ids_append):
+    #     query_id = row_id + "q"
+    #     doc_id = chunk_id
+    #     # TODO: other scoring methods
+    #     contains_answer = False
+    #     for answer in answers:
+    #         if answer in chunk:
+    #             contains_answer = True
+    #             break
+    #     score = 1 if contains_answer else 0
+    #     if query_id not in qrels_qair.keys():
+    #         qrels_qair[query_id] = {}
+    #     qrels_qair[query_id][doc_id] = score
+
+    # qrels scoring for the context for retrieval
+    query_id = row_id + "q"
+    doc_id = row_id + "c"
+    if query_id not in qrels_qair.keys():
+        qrels_qair[query_id] = {}
+    qrels_qair[query_id][doc_id] = 1  # context is always relevant
+
+    texts.extend(chunks_append)
+    ids.extend(ids_append)
+    titles.extend([title] * len(chunks_append))
+    types.extend(["context_split"] * len(chunks_append))
+    origins.extend(["cs" + row_id] * len(chunks_append))  # cs = corpus split
+    
+    corpus_dict_qair["text"].extend(texts)
+    corpus_dict_qair["title"].extend(titles)
+    corpus_dict_qair["type"].extend(types)
+    corpus_dict_qair["origin"].extend(origins)
+    corpus_dict_qair["id"].extend(ids)
