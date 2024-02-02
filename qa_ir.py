@@ -7,9 +7,7 @@ import chunker
 import retrieve
 
 dataset: datasets.Dataset = datasets.load_dataset("squad", split="train")  # trivia_qa, natural_questions
-
-dataset.shuffle()
-# select 10000 samples
+dataset.shuffle()  # select 10000 samples
 dataset = dataset.select(range(10000))
 
 dataloader.qair_init()  # initialize the records for the chunker

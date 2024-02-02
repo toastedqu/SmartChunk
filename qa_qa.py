@@ -2,13 +2,17 @@ from transformers import T5Tokenizer, T5ForConditionalGeneration
 import datasets
 import evaluate
 import typing
+import functools
 import chunker
 
 
 tokenizer = T5Tokenizer.from_pretrained("allenai/unifiedqa-v2-t5-large-1251000")
 model = T5ForConditionalGeneration.from_pretrained("allenai/unifiedqa-v2-t5-large-1251000")
-dataset = datasets.load_dataset("squad", split="train[:20]")  # trivia_qa, natural_questions
 exact_match_metric = evaluate.load("exact_match")
+
+dataset: datasets.Dataset = datasets.load_dataset("squad", split="train")  # trivia_qa, natural_questions
+dataset.shuffle()  # select 10000 samples
+dataset = dataset.select(range(10000))
 
 
 def run_model(input_string: str):
@@ -29,20 +33,8 @@ def run_model(input_string: str):
     return tokenizer.batch_decode(seq, skip_special_tokens=True), avg_prob
 
 
-def respond(question: str, context: str, split: typing.Literal["none", "sent", "cluster", "arbitrary"] = "none", k: int = 4, l: typing.Optional[int] = None):
-    if split == "none":
-        chunks = [context]
-    if split == "sent":
-        # chunk into k-sentence splits
-        chunks, _ = chunker.sent_cont_chunker(doc=context, doc_id=0, k=k)
-    elif split == "cluster":
-        # chunk into k cluster splits
-        chunks, _ = chunker.cluster_chunker(doc=context, doc_id=0, k=k)
-    elif split == "arbitrary":
-        # chunk into k-word splits
-        chunks, _ = chunker.arbitrary_chunker(doc=context, doc_id=0, k=k)
-    else:
-        raise ValueError("Invalid split method")
+def respond(question: str, context: str, chunker: typing.Callable, l: typing.Optional[int] = None):
+    chunks, _ = chunker(doc=context, doc_id="0")  # chunk into splits
     answers = []
     probs = []
     for chunk in chunks:
@@ -59,7 +51,7 @@ def respond(question: str, context: str, split: typing.Literal["none", "sent", "
 
 
 def append_qa_answer(row):
-    row["pred"] = respond(question=row["question"], context=row["context"], split="arbitrary", k=100)
+    row["pred"] = respond(question=row["question"], context=row["context"], chunker=functools.partial(chunker.arbitrary_chunker, k=100))
     row["ref"] = row["answers"]["text"][0]  # only take the first answer in the training set
     return row
 
