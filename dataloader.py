@@ -30,10 +30,12 @@ def convert_corpus(corpus: datasets.Dataset):
 
 
 # read queries to a dataset
-def read_queries(data_folder: str, num_proc: int = 1) -> datasets.Dataset:
+def read_queries(data_folder: str, qrels: datasets.Dataset, num_proc: int = 1) -> datasets.Dataset:
     d: datasets.Dataset = datasets.Dataset.from_json(os.path.join(data_folder, "queries.jsonl"), num_proc=num_proc)
     d = d.rename_column("_id", "id")
     d = d.select_columns(["id", "text"])
+    allowed_query_ids = set(qrels["query_id"])
+    d = d.filter(lambda row: row["id"] in allowed_query_ids, desc="Filtering queries for split", num_proc=num_proc)
     d = d.map(functools.partial(__set_origin__, origin="queries"), desc="Set origin for queries", batched=False, num_proc=num_proc)
     return d
 
@@ -58,11 +60,34 @@ def read_pd(data_folder: str, split: str = "test"):
 
 # read qrels to a dataset
 def read_qrels(data_folder: str, split: typing.Optional[str] = None, num_proc = 1) -> datasets.Dataset:
+    def __preprocess__(ds):
+        ds = ds.rename_columns({
+            "query-id": "query_id",
+            "corpus-id": "doc_id",
+            "score": "score"
+        })
+        new_features = ds.features.copy()
+        new_features["query_id"] = datasets.Value(dtype="string")
+        new_features["doc_id"] = datasets.Value(dtype="string")
+        new_features["score"] = datasets.Value(dtype="int8")
+        ds = ds.cast(new_features)
+        return ds
+
     if split is None:
         # get all the splits in the qrels folder
         splits = [f.split(".")[0] for f in os.listdir(os.path.join(data_folder, "qrels"))]
-        return {split: datasets.Dataset.from_csv(os.path.join(data_folder, "qrels", "{}.tsv".format(split)), delimiter="\t", num_proc=num_proc) for split in splits}
-    return datasets.Dataset.from_csv(os.path.join(data_folder, "qrels", "{}.tsv".format(split)), delimiter="\t", num_proc=num_proc)
+        ds_combined: datasets.Dataset = None
+        for split in splits:
+            ds = datasets.Dataset.from_csv(os.path.join(data_folder, "qrels", "{}.tsv".format(split)), delimiter="\t", num_proc=num_proc)
+            ds = __preprocess__(ds)
+            if ds_combined is None:
+                ds_combined = ds
+            else:
+                ds_combined = datasets.concatenate_datasets([ds_combined, ds])
+        return ds_combined
+    ds = datasets.Dataset.from_csv(os.path.join(data_folder, "qrels", "{}.tsv".format(split)), delimiter="\t", num_proc=num_proc)
+    ds = __preprocess__(ds)
+    return ds
 
 
 # convert qrels to BEIR dict
@@ -83,7 +108,7 @@ def sample(corpus: datasets.Dataset, queries: datasets.Dataset, qrels: datasets.
     return corpus, queries, qrels
 
 
-def beir_process(chunker, row, **kwargs):
+def beir_process(row, chunker):
     doc = row["text"][0]
     title = row["title"][0]
     doc_id = row["id"][0]
@@ -91,7 +116,7 @@ def beir_process(chunker, row, **kwargs):
     titles = [title]
     origins = [row["origin"][0]]
     ids = [doc_id]
-    texts_append, ids_append = chunker(doc, doc_id, **kwargs)
+    texts_append, ids_append = chunker(doc, doc_id)
     texts.extend(texts_append)
     ids.extend(ids_append)
     titles.extend([title] * len(texts_append))
@@ -119,7 +144,7 @@ def qair_init():
         "id": []
     }
 
-def qair_process(chunker, row, **kwargs):
+def qair_process(row, chunker):
     row_id = row["id"][0]
     title = row["title"][0]
     context = row["context"][0]
@@ -131,7 +156,7 @@ def qair_process(chunker, row, **kwargs):
     types = ["question"] + ["context"] + ["answer"] * len(answers)
     origins = ["corpus"] * (2 + len(answers))
     ids = [row_id + "q"] + [row_id + "c"] + [row_id + "a" + str(i) for i in range(len(answers))]
-    chunks_append, ids_append = chunker(context, row_id + "c", **kwargs)  # c = context
+    chunks_append, ids_append = chunker(context, row_id + "c")  # c = context
 
     # # qrels scoring for the chunks for retrieval
     # for chunk, chunk_id in zip(chunks_append, ids_append):

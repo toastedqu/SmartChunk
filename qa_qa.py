@@ -4,6 +4,8 @@ import evaluate
 import typing
 import functools
 import chunker
+import argparse
+import retrieve
 
 
 tokenizer = T5Tokenizer.from_pretrained("allenai/unifiedqa-v2-t5-large-1251000")
@@ -30,34 +32,55 @@ def run_model(input_string: str):
         sum_prob += selected_prob
     avg_prob = sum_prob / len(passes)
 
-    return tokenizer.batch_decode(seq, skip_special_tokens=True), avg_prob
+    return tokenizer.batch_decode(seq, skip_special_tokens=True)[0], avg_prob
+
+
+def run_model_top_l(question: str, chunks: typing.List[str], chunk_ids: typing.List[str], l: int, k: int = 20):
+    for chunk, chunk_id in zip(chunks, chunk_ids):
+        encodings = tokenizer.encode(question + " \\n " + chunk, return_tensors="pt")
+    input_ids = tokenizer.encode(input_string, return_tensors="pt")
+    res = model.generate(input_ids, return_dict_in_generate=True, output_scores=True)
+    seq = res["sequences"]
+    return tokenizer.batch_decode(seq, skip_special_tokens=True)[0]
 
 
 def respond(question: str, context: str, chunker: typing.Callable, l: typing.Optional[int] = None):
-    chunks, _ = chunker(doc=context, doc_id="0")  # chunk into splits
+    chunks, chunk_ids = chunker(doc=context, doc_id="context")  # chunk into splits
     answers = []
     probs = []
-    for chunk in chunks:
-        if l is not None and len(chunk.split(" ")) > l:
-            chunk = " ".join(chunk.split(" ")[:l])  # truncate the chunk to length l tokens
-        ans, prob = run_model(question + " \\n " + chunk)
-        answers.append(ans[0])
-        probs.append(prob)
-    # choose the split answer with the highest probability
-    max_prob = max(probs)
-    max_prob_idx = probs.index(max_prob)
-    answer = answers[max_prob_idx]
+    if l is not None:
+        answer = run_model_top_l(question, chunks, chunk_ids, l)
+    else:
+        for chunk in chunks:
+            ans, prob = run_model(question + " \\n " + chunk)
+            answers.append(ans)
+            probs.append(prob)
+        # choose the split answer with the highest probability
+        max_prob = max(probs)
+        max_prob_idx = probs.index(max_prob)
+        answer = answers[max_prob_idx]
     return answer
 
 
-def append_qa_answer(row):
-    row["pred"] = respond(question=row["question"], context=row["context"], chunker=functools.partial(chunker.arbitrary_chunker, k=100))
+def append_qa_answer(row, chunker_name: str = "whole_chunker", l: typing.Optional[int] = None):
+    row["pred"] = respond(question=row["question"], context=row["context"], chunker=eval(chunker_name), l=l)
     row["ref"] = row["answers"]["text"][0]  # only take the first answer in the training set
     return row
 
 
-dataset = dataset.map(append_qa_answer, batched=False)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="QA-QA")
+    parser.add_argument("-c", "--chunker", type=str, dest="chunker", default="chunker.whole_chunker", help="chunker function")
+    parser.add_argument("-l", "--top-l", type=int, dest="topl", default=None, help="top l tokens to consider in EM")
+    args = parser.parse_args()
 
-exact_match_result = exact_match_metric.compute(predictions=dataset["pred"], references=dataset["ref"])
+    # DEBUG USE
+    # args.chunker = "functools.partial(chunker.cluster_chunker, k=3, mode='k-preserve')"
+    # args.topl = 100
 
-print(exact_match_result)
+    print("QA-QA")
+    print("Arguments:", args)
+
+    dataset = dataset.map(functools.partial(append_qa_answer, chunker_name=args.chunker, l=args.topl), batched=False)
+    exact_match_result = exact_match_metric.compute(predictions=dataset["pred"], references=dataset["ref"])
+    print("Results: ", exact_match_result)

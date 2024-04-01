@@ -9,15 +9,19 @@ import numpy as np
 
 logging.basicConfig(format='%(asctime)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S',
-                    level=logging.INFO,
+                    level=logging.WARN,
                     handlers=[LoggingHandler()])
 
+# load model
 model_path = "msmarco-distilbert-base-tas-b"
+model = DRES(models.SentenceBERT(model_path), batch_size=16, show_progress_bar=False)
+retriever = EvaluateRetrieval(model, score_function="dot")
 
-def main(corpus_split_beir, queries_beir, qrels_beir):
-    # load model and retrieve
-    model = DRES(models.SentenceBERT(model_path), batch_size=16)
-    retriever = EvaluateRetrieval(model, score_function="dot")
+def retrieve(corpus_split_beir, queries_beir, top_k=20):
+    return model.search(corpus_split_beir, queries_beir, top_k=top_k, score_function="dot")
+
+def retrieve_and_evaluate(corpus_split_beir, queries_beir, qrels_beir, k_values=[5, 20]):
+    # retrieve
     results = retriever.retrieve(corpus_split_beir, queries_beir)
 
     # re-construct the results to map and reweight back to the original documents
@@ -35,8 +39,8 @@ def main(corpus_split_beir, queries_beir, qrels_beir):
                 original_results[query_id] = {}
             original_results[query_id][doc_id] = np.mean(score_list)
 
-    # evaluate NDCG@k, MAP@K, Recall@K, and Precision@K where k = [1,3,5,10,100,1000] 
-    ndcg, _map, recall, precision = retriever.evaluate(qrels_beir, original_results, k_values=[5, 20])
+    # evaluate NDCG@k, MAP@K, Recall@K, and Precision@K
+    ndcg, _map, recall, precision = retriever.evaluate(qrels_beir, original_results, k_values=k_values)
 
     print("Evaluation Results:")
     print("NDCG@k:", ndcg)

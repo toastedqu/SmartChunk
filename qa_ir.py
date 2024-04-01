@@ -20,4 +20,4 @@ qrels_beir = dataloader.qrels_qair
 corpus_split_beir = dataloader.convert_corpus(corpus_split)
 queries_beir = dataloader.convert_queries(queries)
 
-retrieve.main(corpus_split_beir, queries_beir, qrels_beir)
+retrieve.retrieve_and_evaluate(corpus_split_beir, queries_beir, qrels_beir)
