@@ -1,0 +1,19 @@
+# model config
+encoder_model: 'all-mpnet-base-v2'
+spacy_model: 'en_core_web_sm'
+
+# chunker config
+## Please edit your kwargs for each chunker here.
+chunker_config:
+# - - whole_chunker
+#   - {}
+- - word_chunker
+  - k: 10
+- - sentence_chunker
+  - k: 1
+- - cluster_chunker
+  - mode: k-split
+    n_clusters: 3
+- - cluster_chunker
+  - mode: k-preserve
+    min_samples: 2
