@@ -15,7 +15,7 @@ cfg = yaml.load(open("config.yaml", "r"), Loader=yaml.FullLoader)
 model = SentenceTransformer(cfg["encoder_model"])
 nlp = spacy.load(cfg["spacy_model"])
 
-###### util funcs ######
+###### helper functions ######
 def __dist__(A: np.ndarray, B: np.ndarray, n_segments: int, lamda: float = 0.5) -> float:
     """Calculate the distance between two embeddings.
 
@@ -71,7 +71,7 @@ def single_linkage_clustering(data: np.ndarray,
         raise ValueError("n_clusters must be specified in 'k-split' mode.")
     if mode == "k-preserve":
         if min_samples is None:
-            msg = "'min_samples' must be specified in 'k-preserve' mode. Will use default min_samples instead."
+            msg = "'min_samples' is not specified in 'k-preserve' mode. Will use default min_samples instead."
             warnings.warn(msg, UserWarning)
             min_samples = len(data) // 10 + 1
         if min_samples > len(data)/2:
@@ -186,9 +186,20 @@ def sentence_chunker(doc: str, doc_id: str, k = 1):
         List[str]: The list of chunked IDs
     """
     sents = [sent.text for sent in nlp(doc).sents]
+
+    # if there are less than k sentences, return the whole chunk
+    if len(sents) < k:
+        return [doc], [doc_id + "|0"]
+
+    # chunk the sentences
     sents = [sents[i:i+k] for i in range(0, len(sents), k)]
+
+    # join the sentences
     texts = [" ".join(chunk) for chunk in sents]
+
+    # get IDs with both doc_id and chunk_id
     ids = ["{}|{}".format(doc_id, chunk_id) for chunk_id,_ in enumerate(sents)]
+
     return texts, ids
 
 def word_chunker(doc: str, doc_id: str, k = 10):
@@ -204,9 +215,20 @@ def word_chunker(doc: str, doc_id: str, k = 10):
         List[str]: The list of chunked IDs
     """
     words = doc.split()
+
+    # if there are less than k words, return the whole chunk
+    if len(words) < k:
+        return [doc], [doc_id + "|0"]
+
+    # chunk the words
     words = [words[i:i+k] for i in range(0, len(words), k)]
+
+    # join the words
     texts = [" ".join(chunk) for chunk in words]
+
+    # get IDs with both doc_id and chunk_id
     ids = ["{}|{}".format(doc_id, chunk_id) for chunk_id,_ in enumerate(words)]
+
     return texts, ids
 
 def cluster_chunker(doc: str,
@@ -242,8 +264,13 @@ def cluster_chunker(doc: str,
         return whole_chunker(doc, doc_id)
 
     # validate input
-    if mode == "k-split" and n_clusters is None:
-        raise ValueError("n_clusters must be specified in 'k-split' mode.")
+    if mode == "k-split":
+        if n_clusters is None:
+            raise ValueError("n_clusters must be specified in 'k-split' mode.")
+        if len(sents) < n_clusters:
+            msg = "The number of segments is less than the number of clusters. Will use sentence_chunker instead."
+            warnings.warn(msg, UserWarning)
+            return sentence_chunker(doc, doc_id, k=1)
 
     # get embeddings
     embs = model.encode(sents)
@@ -275,8 +302,14 @@ def chunk_corpus(corpus: Dict[str, Dict[str, str]],
     chunker = eval(chunker)
     chunked_corpus = {}
     for doc_id, doc in tqdm(corpus.items()):
+        # process text from BEIR-format data
         text = (doc["title"] + ".\n" + doc["text"]).strip() if "title" in doc else doc["text"].strip()
+
+        # get chunks
         chunks, chunk_ids = chunker(text, doc_id, **kwargs)
+
+        # process chunks into BEIR format
         for chunk_id, chunk in zip(chunk_ids, chunks):
             chunked_corpus[chunk_id] = {"text": chunk}
+
     return chunked_corpus

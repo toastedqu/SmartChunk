@@ -56,6 +56,10 @@ def aggregate_doc_scores(doc_scores: Dict[str, Dict[str, List[float]]],
                          strategy: Literal["max", "mean", "sum"] = "max"):
     """Aggregate the chunk scores for each document using the given strategy.
 
+    "max" makes the most sense because what we want is to find the chunk that answers the query.
+    Even if a document contains only one chunk that answers the query,
+    if that chunk is of the highest quality, then the document should be considered relevant.
+
     Args:
         doc_scores (Dict[str, Dict[str, List[float]]): query_id -> {doc_id -> [chunk_scores]}
         strategy (str): The aggregation strategy to use. One of "max", "mean", or "sum".
@@ -102,7 +106,7 @@ def evaluate(qrels: Dict[str, Dict[str, float]],
         eval_results (Dict[str, Dict[str, float]]): metric -> {k -> value}
     """
     # evaluate
-    ndcg, _map, recall, precision = retriever.evaluate(qrels, doc_results, k_values=k_values)
+    ndcg, _map, recall, precision = retriever.evaluate(qrels, doc_results, k_values)
     mrr = retriever.evaluate_custom(qrels, doc_results, k_values, metric="mrr")
     recall_cap = retriever.evaluate_custom(qrels, doc_results, k_values, metric="recall_cap")
     hole = retriever.evaluate_custom(qrels, doc_results, k_values, metric="hole")
@@ -133,8 +137,10 @@ def main(dataset: str):
     Args:
         dataset (str): The name of the dataset.
     """
+    # load data
     corpus, queries, qrels = load_data(dataset)
 
+    # load config
     cfg = yaml.load(open("config.yaml", "r"), Loader=yaml.FullLoader)
 
     for (chunker_name, kwargs) in cfg["chunker_config"]:
@@ -164,7 +170,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.dataset is None:
-        for dataset in ["scidocs", "mldr"]:
+        for dataset in ['trec-covid','nfcorpus','nq','hotpotqa','fiqa', 'webis-touche2020','dbpedia-entity','scidocs','fever','climate-fever','scifact', 'mldr']:
             print(f"Evaluating on {dataset}...")
             main(dataset)
     else:
