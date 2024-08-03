@@ -161,7 +161,7 @@ def main(dataset: str):
 
         # log results
         if not os.path.exists(f"results"): os.mkdir("results")
-        with open(f"results/eval_results_{dataset}.jsonl", "a") as f:
+        with open(f"results/new_eval_results_{dataset}.jsonl", "a") as f:
             f.write(json.dumps(eval_results) + "\n")
 
 if __name__ == "__main__":
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.dataset is None:
-        for dataset in ['trec-covid','nfcorpus','nq','hotpotqa','fiqa', 'webis-touche2020','dbpedia-entity','scidocs','fever','climate-fever','scifact', 'mldr']:
+        for dataset in ['nfcorpus','nq','hotpotqa','fiqa', 'webis-touche2020','dbpedia-entity','scidocs','fever','climate-fever','scifact', 'mldr']:
             print(f"Evaluating on {dataset}...")
             main(dataset)
     else:
