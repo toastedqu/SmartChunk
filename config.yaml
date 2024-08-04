@@ -52,3 +52,6 @@ chunker_config:
   - k: 3
 - - sentence_chunker
   - k: 5
+- - cluster_chunker
+  - mode: k-split
+    n_clusters: 30
