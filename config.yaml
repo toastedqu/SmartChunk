@@ -55,3 +55,7 @@ chunker_config:
 - - cluster_chunker
   - mode: k-split
     n_clusters: 30
+- - cluster_chunker
+  - mode: k-split
+    n_clusters: 20
+    n_sents_per_segment: 3
