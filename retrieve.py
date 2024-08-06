@@ -161,7 +161,7 @@ def main(dataset: str):
 
         # log results
         if not os.path.exists(f"results"): os.mkdir("results")
-        with open(f"results/new_eval_results_{dataset}.jsonl", "a") as f:
+        with open(f"results_test/new_eval_results_{dataset}.jsonl", "a") as f:
             f.write(json.dumps(eval_results) + "\n")
 
 if __name__ == "__main__":

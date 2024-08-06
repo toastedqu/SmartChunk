@@ -6,6 +6,7 @@ import pandas as pd
 from typing import *
 from tqdm import tqdm
 from functools import partial
+from sklearn.cluster import KMeans
 from sentence_transformers import SentenceTransformer
 from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, fcluster
@@ -78,7 +79,7 @@ def single_linkage_clustering(data: np.ndarray,
             msg = "'min_samples' must be less than half the number of sentences. Will use default min_samples instead."
             warnings.warn(msg, UserWarning)
             min_samples = len(data) // 10 + 1
-        n_clusters = len(data)      # k-preserve initializes with total number of segments as n_clusters
+        n_clusters = len(data)//min_samples      # k-preserve initializes with total number of segments as n_clusters
 
     # perform single-linkage clustering
     metric = partial(__dist__, n_segments=len(data), lamda=lamda)
@@ -158,6 +159,34 @@ def log_clusters(text_id_tuples):
     for text, id in zip(texts, ids):
         print(id, text)
         print()
+
+def chunk_corpus(corpus: Dict[str, Dict[str, str]],
+                 chunker: Literal["whole_chunker", "sentence_chunker", "word_chunker", "cluster_chunker"],
+                 **kwargs) -> Dict[str, Dict[str, str]]:
+    """Chunk the given corpus using the specified chunker.
+
+    Args:
+        corpus (dict): A dictionary of documents.
+        chunker (str): The chunker function to use.
+
+    Returns:
+        chunked_corpus (dict): A dictionary of chunked documents.
+    """
+    print(f"Chunking corpus with {chunker}...")
+    chunker = eval(chunker)
+    chunked_corpus = {}
+    for doc_id, doc in tqdm(corpus.items()):
+        # process text from BEIR-format data
+        text = (doc["title"] + ".\n" + doc["text"]).strip() if "title" in doc else doc["text"].strip()
+
+        # get chunks
+        chunks, chunk_ids = chunker(text, doc_id, **kwargs)
+
+        # process chunks into BEIR format
+        for chunk_id, chunk in zip(chunk_ids, chunks):
+            chunked_corpus[chunk_id] = {"text": chunk}
+
+    return chunked_corpus
 
 ###### chunkers ######
 def whole_chunker(doc: str, doc_id: str):
@@ -257,7 +286,7 @@ def cluster_chunker(doc: str,
     """
     sents = [sent.text for sent in nlp(doc).sents]
     if n_sents_per_segment > 1:
-        sents = [''.join(sents[i:i+n_sents_per_segment]) for i in range(0, len(sents), n_sents_per_segment)]
+        sents = [' '.join(sents[i:i+n_sents_per_segment]) for i in range(0, len(sents), n_sents_per_segment)]
 
     # if there is only one segment, return the whole chunk
     if len(sents) == 1:
@@ -286,30 +315,36 @@ def cluster_chunker(doc: str,
 
     return texts, ids
 
-def chunk_corpus(corpus: Dict[str, Dict[str, str]],
-                 chunker: Literal["whole_chunker", "sentence_chunker", "word_chunker", "cluster_chunker"],
-                 **kwargs) -> Dict[str, Dict[str, str]]:
-    """Chunk the given corpus using the specified chunker.
+def kmeans_chunker(doc: str, doc_id: str, n_clusters: int = 10, n_sents_per_segment: int = 1):
+    """Chunk the document into k clusters using k-means clustering.
 
     Args:
-        corpus (dict): A dictionary of documents.
-        chunker (str): The chunker function to use.
+        doc (str): The document text
+        doc_id (str): The document ID
+        n_clusters (int): The number of clusters to form
+        n_sents_per_segment (int): The number of sentences per segment. Clustering is performed on segments
 
     Returns:
-        chunked_corpus (dict): A dictionary of chunked documents.
+        List[str]: The list of chunked texts
+        List[str]: The list of chunked IDs
     """
-    print(f"Chunking corpus with {chunker}...")
-    chunker = eval(chunker)
-    chunked_corpus = {}
-    for doc_id, doc in tqdm(corpus.items()):
-        # process text from BEIR-format data
-        text = (doc["title"] + ".\n" + doc["text"]).strip() if "title" in doc else doc["text"].strip()
+    sents = [sent.text for sent in nlp(doc).sents]
+    if n_sents_per_segment > 1:
+        sents = [' '.join(sents[i:i+n_sents_per_segment]) for i in range(0, len(sents), n_sents_per_segment)]
 
-        # get chunks
-        chunks, chunk_ids = chunker(text, doc_id, **kwargs)
+    # if there is only one segment, return the whole chunk
+    if len(sents) == 1:
+        return whole_chunker(doc, doc_id)
 
-        # process chunks into BEIR format
-        for chunk_id, chunk in zip(chunk_ids, chunks):
-            chunked_corpus[chunk_id] = {"text": chunk}
+    # get embeddings
+    embs = model.encode(sents)
 
-    return chunked_corpus
+    # perform k-means clustering
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0).fit(embs)
+    labels = kmeans.labels_
+
+    # group texts by cluster labels
+    texts, ids = group_by_cluster(sents, labels)
+    ids = ["{}|{}".format(doc_id, cluster_id) for cluster_id in ids]
+
+    return texts, ids
