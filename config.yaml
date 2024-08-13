@@ -1,66 +1,12 @@
-# model config
-encoder_model: 'multi-qa-mpnet-base-cos-v1'
-spacy_model: 'en_core_web_sm'
+datasets: [nfcorpus, nq, hotpotqa, fiqa, webis-touche2020, dbpedia-entity, scidocs, fever, climate-fever, scifact, mldr]
+encoders: [huggingface, openai]
+chunkers: [cluster_chunker, langchain_chunker, sentence_chunker, whole_chunker, word_chunker]
 
-# chunker config
-## Please edit your kwargs for each chunker here.
-chunker_config:
-# - - cluster_chunker     # k-split variations: n_clusters = 3, 5, 7
-#   - mode: k-split
-#     n_clusters: 5
-# - - cluster_chunker
-#   - mode: k-split
-#     n_clusters: 10
-# - - cluster_chunker
-#   - mode: k-split
-#     n_clusters: 20
-# - - cluster_chunker     # k-split variations: n_sents_per_segment = 1, 3, 5
-#   - mode: k-split
-#     n_clusters: 5
-#     n_sents_per_segment: 3
-# - - cluster_chunker
-#   - mode: k-split
-#     n_clusters: 5
-#     n_sents_per_segment: 5
-# - - cluster_chunker     # k-preserve variations: min_samples = default, 2, 4, 6
-#   - mode: k-preserve
-# - - cluster_chunker
-#   - mode: k-preserve
-#     min_samples: 2
-# - - cluster_chunker
-#   - mode: k-preserve
-#     min_samples: 4
-# - - cluster_chunker
-#   - mode: k-preserve
-#     min_samples: 6
-# - - cluster_chunker     # k-preserve variations: lamda = 0, 0.25, 0.5, 0.75
-#   - mode: k-preserve
-#     lamda: 0.25
-# - - cluster_chunker
-#   - mode: k-preserve
-#     lamda: 0.5
-# - - cluster_chunker
-#   - mode: k-preserve
-#     lamda: 0.75
-# - - whole_chunker
-#   - {}
-# - - word_chunker
-#   - k: 10
-# - - sentence_chunker    # sentence variations
-#   - k: 1
-# - - sentence_chunker
-#   - k: 3
-# - - sentence_chunker
-#   - k: 5
-# - - cluster_chunker
-#   - mode: k-split
-#     n_clusters: 30
-# - - cluster_chunker
-#   - mode: k-split
-#     n_clusters: 20
-#     n_sents_per_segment: 3
-# - - kmeans_chunker
-#   - n_clusters: 10
-- - cluster_chunker
-  - mode: k-split
-    lamda: 1.0
+# add hyperparameter configs below for your own chunker
+word_chunker_k: [10]
+sentence_chunker_k: [1, 3, 5]
+cluster_chunker_lamda: [0, 0.25, 0.5, 0.75, 1]
+cluster_chunker_max_samples_per_cluster: [null, 1, 3, 5, 10]
+langchain_chunker_breakpoint_threshold_amount: [0.1, 0.3, 0.5, 0.7, 0.9]
+# YOUR_CHUNKER_HYPERPARAMETER_1: [VALUE1, VALUE2, ...]
+# YOUR_CHUNKER_HYPERPARAMETER_2: [VALUE1, VALUE2, ...]
