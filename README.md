@@ -16,6 +16,17 @@ This project aims to investigate the performance of various chunking strategies 
 - `utils.py`: Helper functions
 - `clusters.py`: Functions for clustering-based chunking strategies.
 
+## Replicate
+Create a virtual environment (Python 3.10 preferred). Install all the required dependencies via
+```
+pip install -r requirements.txt
+```
+
+Then simply execute `run.py`.
+```
+python run.py
+```
+
 ## Custom Dataloader
 To test on your own data, simply put your dataloader function in `dataloader.py`, add the function call to the `load_data(dataset)` function following the format of the commented lines, and add your dataset name to the `datasets` list in `config.yaml`.
 

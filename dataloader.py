@@ -65,6 +65,8 @@ def load_mldr(lang: str = 'en', split: str = 'test'):
         qrels_beir[query_info['query_id']] = {}
         for positive_passage in query_info['positive_passages']:
             qrels_beir[query_info['query_id']][positive_passage['docid']] = 1
+        for negative_passage in query_info['negative_passages']:
+            qrels_beir[query_info['query_id']][negative_passage['docid']] = 0
 
     # get a subset because the original data is too large
     corpus_subset, queries_subset, qrels_subset = get_subset(corpus_beir, queries_beir, qrels_beir)

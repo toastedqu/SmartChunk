@@ -26,7 +26,7 @@ def join_title_text(doc: Dict[str, str]) -> str:
     """
     return (doc["title"] + ".\n" + doc["text"]).strip() if "title" in doc else doc["text"].strip()
 
-def get_subset(corpus, queries, qrels, subset_size = 100):
+def get_subset(corpus, queries, qrels, subset_size = 50):
     """Get a random subset of corpus, queries and qrels.
 
     Args:

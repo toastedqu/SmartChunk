@@ -1,4 +1,5 @@
-datasets: [nfcorpus, nq, hotpotqa, fiqa, webis-touche2020, dbpedia-entity, scidocs, fever, climate-fever, scifact, mldr]
+# datasets: [nfcorpus, nq, hotpotqa, fiqa, webis-touche2020, dbpedia-entity, scidocs, fever, climate-fever, scifact, mldr]
+datasets: [mldr]
 encoders: [huggingface, openai]
 chunkers: [cluster_chunker, langchain_chunker, sentence_chunker, whole_chunker, word_chunker]
 
