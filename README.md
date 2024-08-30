@@ -27,7 +27,8 @@ Then simply execute `run.py`.
 python run.py
 ```
 
-## Custom Dataloader
+## Customization
+### Custom Dataloader
 To test on your own data, simply put your dataloader function in `dataloader.py`, add the function call to the `load_data(dataset)` function following the format of the commented lines, and add your dataset name to the `datasets` list in `config.yaml`.
 
 Your custom dataloader function must return the following values:
@@ -68,7 +69,7 @@ qrels = {
 }
 ```
 
-## Custom Chunker
+### Custom Chunker
 To test your custom chunker, simply put your chunker function in `chunkers.py`, and add the chunker name (same as its function name) and its hyperparameter configurations to `config.yaml`.
 
 For structure and readability, if your chunker function depends on other clustering algorithms, please put them in `clusters.py`. If your chunker function depends on other helper functions, please put them in `utils.py`.
@@ -84,14 +85,14 @@ Your custom chunker function must meet the following requirements:
     - `ids (List[str])`: The list of chunk IDs
 3. Each returned chunk ID must follow the `{doc_id}|{chunk_id}` format.
 
-## Custom Encoder
+### Custom Encoder
 This projects uses [Langchain](https://python.langchain.com/v0.2/docs/integrations/text_embedding/) to access various embeddings.
 
 To test a new encoder on Langchain, simply add the Langchain embedding to `get_encoder(encoder_name)` in `encoder.py` following the format of the commented lines, and add your encoder name to the `encoders` list in `config.yaml`.
 
 To test your custom encoder that is not on Langchain, please follow [Langchain Custom Embeddings](https://api.python.langchain.com/en/latest/chains/langchain.chains.hyde.base.HypotheticalDocumentEmbedder.html) to create your own encoder class, put it in `encoder.py`, and add it to the `get_encoder(encoder_name)` function, so that the codes can utilize your model smoothly.
 
-## Custom Experiment
+### Custom Experiment
 To run the experiment with your new configurations, make sure in `config.yaml`:
 - Your dataset is in `datasets` list.
 - Your encoder is in `encoders` list.

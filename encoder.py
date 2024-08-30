@@ -1,40 +1,38 @@
+import numpy as np
 from typing import List, Dict
 from utils import join_title_text
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
-import numpy as np
 
-def get_encoder(encoder_name: str):
-    """Get the encoder for Langchain.
+class CustomEncoder:
+    def __init__(self, encoder_name, device: str = "cpu"):
+        self.name = encoder_name
+        self.device = device
+        self.get_encoder(encoder_name)
 
-    This function is used elsewhere so should not be included in CustomRetriever.
+    def get_encoder(self, encoder_name: str):
+        """Get the encoder for Langchain.
 
-    Args:
-        model (str): The encoder model to use
+        This function is used elsewhere so should not be included in CustomRetriever.
 
-    Returns:
-        encoder: The encoder object
-    """
-    if encoder_name == "openai":
-        return OpenAIEmbeddings(model='text-embedding-3-large')
-    elif encoder_name == "huggingface":
-        return HuggingFaceEmbeddings(model_name="multi-qa-mpnet-base-cos-v1", model_kwargs = {'device': 'cuda'})
-    # elif encoder_name == "YOUR_CUSTOM_ENCODER_ON_LANGCHAIN":
-    #     return YourCustomLangchainEmbeddings()
-    else:
-        raise ValueError("Invalid encoder name")
+        Args:
+            model (str): The encoder model to use
 
-class CustomRetriever:
-    def __init__(self, encoder_name):
-        self.model = get_encoder(encoder_name)
+        Returns:
+            encoder: The encoder object
+        """
+        if encoder_name == "openai":
+            self.model = OpenAIEmbeddings(model='text-embedding-3-small')
+        elif encoder_name == "huggingface":
+            self.model = HuggingFaceEmbeddings(model_name="multi-qa-mpnet-base-cos-v1", model_kwargs = {'device': self.device})
+        # elif encoder_name == "YOUR_CUSTOM_ENCODER_ON_LANGCHAIN":
+        #     self.model = YourCustomLangchainEmbeddings()
+        else:
+            raise ValueError("Invalid encoder name")
 
-    # so this is very stupid.
-    # langchain's `embed_query()` function does not support batch encoding in parallel.
-    # but BEIR requires batch_size in the args, so we are just gonna leave it here.
-    # this is very slow. need batch encoding in the future.
-    def encode_queries(self, queries: List[str], batch_size: int, **kwargs) -> np.ndarray:
-        return np.array([self.model.embed_query(query) for query in queries]).astype(float)
+    def encode_queries(self, queries: List[str], batch_size: int = 16, **kwargs) -> np.ndarray:
+        return np.array(self.model.embed_documents(queries)).astype(float)
 
-    def encode_corpus(self, corpus: List[Dict[str, str]], batch_size: int, **kwargs) -> np.ndarray:
+    def encode_corpus(self, corpus: List[Dict[str, str]], batch_size: int = 16, **kwargs) -> np.ndarray:
         docs = [join_title_text(doc) for doc in corpus]
         return np.array(self.model.embed_documents(docs)).astype(float)

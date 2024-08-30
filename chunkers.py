@@ -1,7 +1,9 @@
 from utils import *
-from clusters import *
+from custom_clustering import *
 from tqdm import tqdm
-from langchain_experimental.text_splitter import SemanticChunker
+from encoder import CustomEncoder
+from custom_langchain import SemanticChunker
+from sklearn.cluster import DBSCAN
 
 ###### chunkers ######
 def whole_chunker(doc: str, doc_id: str):
@@ -43,7 +45,7 @@ def sentence_chunker(doc: str, doc_id: str, k = 1):
     texts = [" ".join(chunk) for chunk in sents]
 
     # get IDs with both doc_id and chunk_id
-    ids = ["{}|{}".format(doc_id, chunk_id) for chunk_id,_ in enumerate(sents)]
+    ids = ["{}~{}".format(doc_id, chunk_id) for chunk_id,_ in enumerate(sents)]
 
     return texts, ids
 
@@ -73,12 +75,17 @@ def word_chunker(doc: str, doc_id: str, k = 10):
     texts = [" ".join(chunk) for chunk in words]
 
     # get IDs with both doc_id and chunk_id
-    ids = ["{}|{}".format(doc_id, chunk_id) for chunk_id,_ in enumerate(words)]
+    ids = ["{}~{}".format(doc_id, chunk_id) for chunk_id,_ in enumerate(words)]
 
     return texts, ids
 
 
-def cluster_chunker(doc, doc_id, encoder = None, lamda: float = 0.5, max_samples_per_cluster: Optional[int] = None):
+def cluster_chunker(doc: str,
+                    doc_id: str,
+                    lamda: float = 0.5,
+                    max_samples_per_cluster: Optional[int] = None,
+                    precomputed_embeddings: Optional[str] = None,
+                    encoder_name: str = "huggingface"):
     """Chunk the document into clusters using single linkage clustering.
 
     Args:
@@ -92,32 +99,34 @@ def cluster_chunker(doc, doc_id, encoder = None, lamda: float = 0.5, max_samples
         List[str]: The list of chunked texts
         List[str]: The list of chunked IDs
     """
-    if not encoder: raise ValueError("Encoder is required for cluster_chunker")
-
-    # split the document into sentences
     sents = split_sentences(doc)
+    if not precomputed_embeddings:
+        embs = CustomEncoder(encoder_name).encode_queries(sents)
+    else:
+        embs = load_embeddings(doc_id, precomputed_embeddings, encoder_name)
 
-    # to prevent long ingestion latency caused by large number of sentences
-    # group sentences together iteratively until the number of segments is less than 500
-    while len(sents) > 500:
-        sents = [' '.join(sents[i:i+2]) for i in range(0, len(sents), 2)]
+    try:
+        # perform single linkage clustering
+        labels = single_linkage_clustering(embs, lamda=lamda, max_samples_per_cluster=max_samples_per_cluster)
 
-    # get embeddings
-    embs = encoder.embed_documents(sents)
+        # group texts by cluster labels
+        texts, ids = group_by_cluster(sents, labels)
 
-    # perform single linkage clustering
-    labels = single_linkage_clustering(embs, lamda=lamda, max_samples_per_cluster=max_samples_per_cluster)
+        # get IDs with both doc_id and cluster_id
+        ids = ["{}~{}".format(doc_id, cluster_id) for cluster_id in ids]
 
-    # group texts by cluster labels
-    texts, ids = group_by_cluster(sents, labels)
-
-    # get IDs with both doc_id and cluster_id
-    ids = ["{}|{}".format(doc_id, cluster_id) for cluster_id in ids]
-
-    return texts, ids
+        return texts, ids
+    except:
+        return sentence_chunker(doc, doc_id, k=3)
 
 
-def langchain_chunker(doc: str, doc_id: str, encoder = None, breakpoint_threshold_amount: float = 0.5):
+def langchain_chunker(doc: str,
+                      doc_id: str,
+                      breakpoint_threshold_type: str = "percentile",
+                      breakpoint_threshold_amount: float = 50,
+                      precomputed_embeddings: Optional[str] = None,
+                      encoder_name: str = "huggingface",
+                      **kwargs):
     """Chunk the document into clusters using Langchain semantic chunking.
 
     Args:
@@ -130,18 +139,88 @@ def langchain_chunker(doc: str, doc_id: str, encoder = None, breakpoint_threshol
         List[str]: The list of chunked texts
         List[str]: The list of chunked IDs
     """
-    if not encoder: raise ValueError("Encoder is required for langchain_chunker")
-
+    if precomputed_embeddings is not None:
+        embs = load_embeddings(doc_id, precomputed_embeddings, encoder_name)
+    else:
+        embs = None
     # get langchain semantic chunker
-    text_splitter = SemanticChunker(encoder, breakpoint_threshold_type="percentile", breakpoint_threshold_amount=breakpoint_threshold_amount)
+    text_splitter = SemanticChunker(
+        CustomEncoder(encoder_name).model,
+        breakpoint_threshold_type=breakpoint_threshold_type,
+        breakpoint_threshold_amount=breakpoint_threshold_amount,
+        precomputed_embeddings=embs
+    )
 
-    # split the document into semantic chunks
-    texts = text_splitter.create_documents([doc])
-    texts = [text.page_content for text in texts]
+    try:
+        # split the document into semantic chunks
+        texts = text_splitter.create_documents([doc])
+        texts = [text.page_content for text in texts]
+
+        # get IDs with both doc_id and cluster_id
+        ids = ["{}~{}".format(doc_id, cluster_id) for cluster_id in range(len(texts))]
+
+        return texts, ids
+    except:
+        return sentence_chunker(doc, doc_id, 3)
+
+
+def dbscan_chunker(doc: str,
+                   doc_id: str,
+                   lamda: float = 0.5,
+                   eps: float = 0.2,
+                   min_samples: int = 5,
+                   precomputed_embeddings: Optional[str] = None,
+                   encoder_name: str = "huggingface"):
+    sents = split_sentences(doc)
+    if not precomputed_embeddings:
+        embs = CustomEncoder(encoder_name).encode_queries(sents)
+    else:
+        embs = load_embeddings(doc_id, precomputed_embeddings, encoder_name)
+
+    # perform single linkage clustering
+    labels = DBSCAN(eps=eps, min_samples=min_samples, metric=partial(get_dist, n_segments=len(embs), lamda=lamda)).fit(embs).labels_
+
+    # group texts by cluster labels
+    texts, ids = group_by_cluster(sents, labels)
 
     # get IDs with both doc_id and cluster_id
-    ids = ["{}|{}".format(doc_id, cluster_id) for cluster_id in range(len(texts))]
+    ids = ["{}~{}".format(doc_id, cluster_id) for cluster_id in ids]
 
+    return texts, ids
+
+
+def baseline_chunker(doc: str,
+                     doc_id: str,
+                     breakpoint_threshold_type: Literal["distance", "gradient"] = "distance",
+                     breakpoint_threshold_amount: float = 0.5,
+                     precomputed_embeddings: Optional[str] = None,
+                     encoder_name: str = "huggingface",
+                     **kwargs):
+    sents = split_sentences(doc)
+    if not precomputed_embeddings:
+        embs = CustomEncoder(encoder_name).encode_queries(sents)
+    else:
+        embs = load_embeddings(doc_id, precomputed_embeddings, encoder_name)
+
+    distances = [0]+[get_dist(embs[i], embs[i+1], len(embs), 0) for i in range(len(embs)-1)]
+    if breakpoint_threshold_type == "gradient":
+        try:
+            distances = np.abs(np.gradient(distances, edge_order=1))
+        except:
+            return sentence_chunker(doc, doc_id, 3)
+    breakpoints = set([i for i, distance in enumerate(distances) if distance > breakpoint_threshold_amount])
+    labels = []
+    curr_label = 0
+    for i, _ in enumerate(sents):
+        if i in breakpoints:
+            curr_label += 1
+        labels.append(curr_label)
+
+    # group texts by cluster labels
+    texts, ids = group_by_cluster(sents, labels)
+
+    # get IDs with both doc_id and cluster_id
+    ids = ["{}~{}".format(doc_id, cluster_id) for cluster_id in ids]
     return texts, ids
 
 

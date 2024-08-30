@@ -318,11 +318,11 @@ cython_debug/
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,pycharm
 
-draft.ipynb
-draft.py
+draft*
 old/
 acquired_ms.txt
 results_old/
 dataloader_old.py
-results_test/
-results/new_*
+results/
+embeddings/
+subsets/

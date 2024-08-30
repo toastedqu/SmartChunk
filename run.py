@@ -2,14 +2,15 @@ import os
 import yaml
 import json
 import time
+import itertools
 import numpy as np
 from typing import *
-from chunkers import chunk_corpus
-from dataloader import load_data
 from encoder import *
+from chunkers import chunk_corpus
+from dataloader import logger, load_data
+from joblib import Parallel, delayed
 from beir.retrieval.evaluation import EvaluateRetrieval
 from beir.retrieval.search.dense import DenseRetrievalExactSearch as DRES
-
 k_values = [1,3,5,10,20]
 
 # load model
@@ -24,11 +25,12 @@ def timed_retrieve(corpus: Dict[str, Dict[str, str]], queries: Dict[str, str], r
         chunk_results (Dict[str, Dict[str, float]]): query_id -> {chunk_id -> score}
         latency (float): The time taken to retrieve the chunks.
     """
-    print("Retrieving...")
+    logger.info("Retrieving...")
     start = time.time()
     chunk_results = retriever.retrieve(corpus, queries)
     end = time.time()
     return chunk_results, end-start
+
 
 def chunks_to_docs(chunk_results: Dict[str, Dict[str, float]]):
     """Reconstruct the chunk-level retrieval results to document-level results.
@@ -39,14 +41,15 @@ def chunks_to_docs(chunk_results: Dict[str, Dict[str, float]]):
     Returns:
         doc_scores (Dict[str, Dict[str, List[float]]): query_id -> {doc_id -> [chunk_scores]}
     """
-    print("Reconstructing from chunks to docs...")
+    logger.info("Reconstructing from chunks to docs...")
     doc_scores = {}
     for query_id, query_result in chunk_results.items():
         doc_scores[query_id] = {}
         for chunk_id, score in query_result.items():
-            doc_id = chunk_id.split("|")[0]
+            doc_id = chunk_id.split("~")[0]
             doc_scores[query_id][doc_id] = doc_scores[query_id].get(doc_id, []) + [score]
     return doc_scores
+
 
 def aggregate_doc_scores(doc_scores: Dict[str, Dict[str, List[float]]],
                          strategy: Literal["max", "mean", "sum"] = "max"):
@@ -63,7 +66,7 @@ def aggregate_doc_scores(doc_scores: Dict[str, Dict[str, List[float]]],
     Returns:
         doc_results (Dict[str, Dict[str, float]]): query_id -> {doc_id -> doc_score}
     """
-    print("Aggregating scores...")
+    logger.info("Aggregating scores...")
     doc_results = {}
     for query_id, query_result in doc_scores.items():
         doc_results[query_id] = {}
@@ -76,6 +79,7 @@ def aggregate_doc_scores(doc_scores: Dict[str, Dict[str, List[float]]],
                 doc_results[query_id][doc_id] = np.sum(score_list)
     return doc_results
 
+
 def evaluate(qrels: Dict[str, Dict[str, float]],
              doc_results: Dict[str, Dict[str, float]],
              retriever: EvaluateRetrieval,
@@ -86,7 +90,7 @@ def evaluate(qrels: Dict[str, Dict[str, float]],
         qrels (Dict[str, Dict[str, float]]): query_id -> {doc_id -> relevance_score}
         doc_results (Dict[str, Dict[str, float]]): query_id -> {doc_id -> doc_score}
 
-    Prints:
+    logs:
         NDCG@k: The ranking quality of retrieved documents up to position k, considering both relevance and position.
         MAP@k: The mean average precision of retrieved documents up to position k.
         Recall@k: The fraction of relevant documents retrieved within top-k results.
@@ -103,7 +107,7 @@ def evaluate(qrels: Dict[str, Dict[str, float]],
     # evaluate
     ndcg, _map, recall, precision = retriever.evaluate(qrels, doc_results, k_values)
     mrr = retriever.evaluate_custom(qrels, doc_results, k_values, metric="mrr")
-    recall_cap = retriever.evaluate_custom(qrels, doc_results, k_values, metric="recall_cap")
+    # recall_cap = retriever.evaluate_custom(qrels, doc_results, k_values, metric="recall_cap")
     hole = retriever.evaluate_custom(qrels, doc_results, k_values, metric="hole")
     top_k_accuracy = retriever.evaluate_custom(qrels, doc_results, k_values, metric="top_k_accuracy")
 
@@ -114,85 +118,122 @@ def evaluate(qrels: Dict[str, Dict[str, float]],
         "Recall@k": recall,
         "Precision@k": precision,
         "MRR@k": mrr,
-        "R_cap@k": recall_cap,
+        # "R_cap@k": recall_cap,
         "Hole@k": hole,
         "Accuracy@k": top_k_accuracy,
         "Latency": latency,
     }
-    print("Evaluation Results:")
+    logger.info("Evaluation Results:")
     for metric, value in eval_results.items():
-        print(f"{metric}: {value}")
-    print()
+        logger.info(f"{metric}: {value}")
+    logger.info()
 
     return eval_results
 
-def main(corpus, queries, qrels, retriever, chunker, **kwargs):
-    """Run the experiment for the given dataset.
+
+def log_results(eval_results, dataset, encoder_name, chunker, kwargs):
+    """Log the evaluation results to a file.
 
     Args:
+        eval_results (Dict[str, Dict[str, float]): The evaluation results.
         dataset (str): The name of the dataset.
+        encoder_name (str): The name of the encoder.
+        chunker (str): The name of the chunker.
+        kwargs (Dict): The hyperparameters.
     """
-    # chunk corpus
-    corpus_chunked = chunk_corpus(corpus, chunker, verbose=False, **kwargs)
-
-    # retrieve
-    chunk_results, latency = timed_retrieve(corpus_chunked, queries, retriever)
-
-    # reconstruct from chunks to docs
-    doc_scores = chunks_to_docs(chunk_results)
-
-    # aggregate doc scores
-    doc_results = aggregate_doc_scores(doc_scores)
-
-    # evaluate
-    return evaluate(qrels, doc_results, retriever, latency)
-
-def log_results(eval_results, dataset, encoder, chunker, **kwargs):
     if not os.path.exists(f"results"): os.mkdir("results")
     with open(f"results/results.jsonl", "a") as f:
         eval_results.update({
             "dataset": dataset,
-            "encoder": encoder,
+            "encoder": encoder_name,
             "chunker": chunker,
             "hyperparams": kwargs
         })
         f.write(json.dumps(eval_results) + "\n")
 
-if __name__ == "__main__":
-    cfg = yaml.load(open("config.yaml", "r"), Loader=yaml.FullLoader)
 
-    for dataset in cfg['datasets']:
-        corpus, queries, qrels = load_data(dataset)
-        for encoder_name in cfg['encoders']:
-            encoder = get_encoder(encoder_name)
-            retriever = EvaluateRetrieval(DRES(CustomRetriever(encoder_name), batch_size=16, show_progress_bar=False))
-            for chunker in cfg['chunkers']:
-                print(f"Evaluating on {dataset} with {encoder_name} encoder and {chunker}...")
-                if chunker == 'whole_chunker':
-                    eval_results = main(corpus, queries, qrels, retriever, chunker)
-                    log_results(eval_results, dataset, encoder_name, chunker)
-                elif chunker == 'word_chunker':
-                    for k in cfg['word_chunker_k']:
-                        print(f"Word Chunker: k={k}")
-                        eval_results = main(corpus, queries, qrels, retriever, chunker, k=k)
-                        log_results(eval_results, dataset, encoder_name, chunker, word_chunker_k=k)
-                elif chunker == 'sentence_chunker':
-                    for k in cfg['sentence_chunker_k']:
-                        print(f"Sentence Chunker: k={k}")
-                        eval_results = main(corpus, queries, qrels, retriever, chunker, k=k)
-                        log_results(eval_results, dataset, encoder_name, chunker, sentence_chunker_k=k)
-                elif chunker == 'cluster_chunker':
-                    for lamda in cfg['cluster_chunker_lamda']:
-                        for max_samples_per_cluster in cfg['cluster_chunker_max_samples_per_cluster']:
-                            print(f"Cluster Chunker: lamda={lamda}, max_samples_per_cluster={max_samples_per_cluster}")
-                            eval_results = main(corpus, queries, qrels, retriever, chunker, encoder=encoder, lamda=lamda, max_samples_per_cluster=max_samples_per_cluster)
-                            log_results(eval_results, dataset, encoder_name, chunker, lamda=lamda, max_samples_per_cluster=max_samples_per_cluster)
-                elif chunker == 'langchain_chunker':
-                    for breakpoint_threshold_amount in cfg['langchain_chunker_breakpoint_threshold_amount']:
-                        print(f"Langchain Chunker: breakpoint_threshold_amount={breakpoint_threshold_amount}")
-                        eval_results = main(corpus, queries, qrels, retriever, chunker, encoder=encoder, breakpoint_threshold_amount=breakpoint_threshold_amount)
-                        log_results(eval_results, dataset, encoder_name, chunker, breakpoint_threshold_type="percentile", breakpoint_threshold_amount=breakpoint_threshold_amount)
-                # elif chunker == 'YOUR_CUSTOM_CHUNKER':
-                #     for YOUR_HYPERPARAMETER_VALUE in cfg['YOUR_HYPERPARAMETER_VALUES']:
-                #         eval_results = main(corpus, queries, qrels, retriever, chunker, YOUR_HYPERPARAMETER=YOUR_HYPERPARAMETER_VALUE)
-                #         log_results(eval_results, dataset, encoder_name, chunker, YOUR_HYPERPARAMETER=YOUR_HYPERPARAMETER_VALUE)
+def run(dataset, encoder_name, chunker_cfg, device):
+    """Run the experiment for the given dataset.
+
+    Args:
+        dataset (str): The name of the dataset.
+    """
+    chunker = chunker_cfg.pop("chunker")
+    kwargs = chunker_cfg
+    if chunker in {"cluster_chunker", "dbscan_chunker", "langchain_chunker", "baseline_chunker"}:
+        kwargs["precomputed_embeddings"] = dataset
+        kwargs["encoder_name"] = encoder_name
+
+    retriever = EvaluateRetrieval(DRES(CustomEncoder(encoder_name, device), batch_size=16, show_progress_bar=False))
+
+    logger.info(f"Dataset: {dataset}")
+    logger.info(f"Encoder: {encoder_name}")
+    logger.info(f"Chunker: {chunker}")
+    logger.info(f"Hyperparameters: {kwargs}")
+
+    # load data
+    logger.info("Loading data...")
+    corpus, queries, qrels = load_data(dataset)
+
+    # chunk corpus
+    logger.info("Chunking corpus...")
+    corpus_chunked = chunk_corpus(corpus, chunker, verbose=False, **kwargs)
+
+    # retrieve
+    logger.info("Retrieving...")
+    chunk_results, latency = timed_retrieve(corpus_chunked, queries, retriever)
+
+    # reconstruct from chunks to docs
+    logger.info("Reconstructing scores from chunks to docs...")
+    doc_scores = chunks_to_docs(chunk_results)
+
+    # aggregate doc scores
+    logger.info("Aggregating scores...")
+    doc_results = aggregate_doc_scores(doc_scores)
+
+    # evaluate
+    logger.info("Evaluating...")
+    eval_results = evaluate(qrels, doc_results, retriever, latency)
+
+    # log results
+    logger.info("Logging results...")
+    log_results(eval_results, dataset, encoder_name, chunker, kwargs)
+
+
+def get_configs():
+    """Get a list of all combinations of hyperparameter configurations for the experiment.
+
+    Returns:
+        List[Dict[str, Any]]: The list of configurations.
+    """
+    cfg = yaml.load(open("config.yaml", "r"), Loader=yaml.FullLoader)
+    temp = {
+        'dataset': cfg['datasets'],
+        'encoder_name': cfg['encoders'],
+        'chunker_cfg': []
+    }
+    chunkers = cfg['chunkers']
+    for chunker in chunkers:
+        if chunker in {'langchain_chunker', 'baseline_chunker'}:
+            combinations = [{
+                "breakpoint_threshold_type": breakpoint_threshold_type,
+                "breakpoint_threshold_amount": breakpoint_threshold_amount
+            } for breakpoint_threshold_type in cfg[chunker]['breakpoint_threshold_type'] for breakpoint_threshold_amount in cfg[chunker][breakpoint_threshold_type]]
+        elif chunker in cfg:
+            keys, values = zip(*cfg[chunker].items())
+            combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+        else:
+            combinations = [{}]
+        for combination in combinations:
+            combination['chunker'] = chunker
+        temp['chunker_cfg'] += combinations
+
+    keys, values = zip(*temp.items())
+    combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+    return combinations
+
+
+
+if __name__ == "__main__":
+    cfgs = get_configs()
+    Parallel(n_jobs=4)(delayed(run)(**cfg, device=f"cuda:{i%4}") for i, cfg in enumerate(cfgs))
