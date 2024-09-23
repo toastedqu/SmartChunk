@@ -3,15 +3,42 @@ from typing import List
 from sentence_transformers import SentenceTransformer, util
 
 class Encoder:
+    """A class to encode queries and documents using a SentenceTransformer model.
+
+    Attributes:
+        model (SentenceTransformer): The SentenceTransformer model to use for encoding.
+        prompt_name (str): The name of the prompt to use for encoding queries.
+    """
     def __init__(self, model_name: str = "dunzhang/stella_en_1.5B_v5", device: int = 0):
+        """Initialize the Encoder class.
+
+        Args:
+            model_name (str, optional): The name of the SentenceTransformer model to use. Defaults to "dunzhang/stella_en_1.5B_v5".
+            device (int, optional): The device to use for encoding. Defaults to 0.
+        """
         self.model = SentenceTransformer(model_name, trust_remote_code=True, device=f"cuda:{device}")
         self.prompt_name = "s2p_query"
 
     def encode_queries(self, queries: str | List[str]) -> np.ndarray:
+        """Encode the queries using the SentenceTransformer model.
+
+        Args:
+            queries (str | List[str]): The queries to encode.
+
+        Returns:
+            np.ndarray: The embeddings of the queries.
+        """
         if isinstance(queries, str): queries = [queries]
         return self.model.encode(queries, prompt_name=self.prompt_name)
 
     def encode_documents(self, docs: str | List[str]) -> np.ndarray:
+        """Encode the documents using the SentenceTransformer model.
+
+        Args:
+            docs (str | List[str]): The documents to encode.
+
+        Returns:
+            np.ndarray: The embeddings of the documents."""
         if isinstance(docs, str): docs = [docs]
         return self.model.encode(docs)
 

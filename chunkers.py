@@ -14,34 +14,79 @@ nlp = spacy.load("en_core_web_sm")
 
 ###### chunkers ######
 class BaseChunker:
+    """
+    BaseChunker is a base class for splitting documents into chunks.
+    BaseChunker considers each document as a whole chunk.
+    """
     def __init__(self):
         pass
 
     def chunk(self, doc: str | List[str], doc_id: int = 0):
+        """Split the document into chunks.
+
+        It is preferred that a document is splitted into sentences beforehand.
+        If the document is not splitted, then spacy is used to split the document into sentences.
+
+        Each chunker will only return the sentence indices in each chunk, NOT the actual sentences,
+        for the convenience of storage and computation.
+
+        Args:
+            doc (str | List[str]): The document to chunk.
+
+        Returns:
+            Dict[str, List[int]]: The dictionary of chunks, where the key is the document ID and the value is the list of sentence indices.
+        """
         if isinstance(doc, str):
             doc = split_sentences(doc)
         return self._convert_chunks_to_dict([list(range(len(doc)))], doc_id)
 
     def chunk_corpus(self, corpus: List[List[str]]):
+        """Split the corpus into chunks.
+
+        Args:
+            corpus (List[List[str]]): A list of documents to chunk.
+
+        Returns:
+            List[Dict[str, List[int]]]: The list of dictionaries of chunks, where the key is the chunk ID and the value is the list of sentence indices.
+        """
         return [self.chunk(doc, i) for i, doc in tqdm(enumerate(corpus))]
 
     def _convert_chunks_to_dict(self, chunks: List[List[int]], doc_id: int = 0):
+        """Convert the list of chunks to a dictionary.
+
+        We need a specific doc_chunk_id key for the convenience of evaluation later.
+
+        Args:
+            chunks (List[List[int]]): The list of chunks, where each chunk is a list of sentence indices.
+            doc_id (int): The document ID.
+
+        Returns:
+            Dict[str, List[int]]: The dictionary of chunks, where the key is the chunk ID and the value is the list of sentence indices.
+        """
         return {f"{doc_id}|{i}": chunk for i, chunk in enumerate(chunks)}
 
 
+
 class PositionalChunker(BaseChunker):
+    """
+    PositionalChunker splits documents into consecutive chunks of consecutive sentences.
+
+    Attributes:
+        n_chunks (Optional[int]): The number of chunks to split the document into.
+        n_sents_per_chunk (Optional[int]): The number of sentences per chunk.
+            Note: n_sents_per_chunk and n_chunks are mutually exclusive.
+            If both are provided, n_sents_per_chunk will be ignored.
+            n_chunks is only an approximation and may not be exact.
+        n_sents_overlap (int): The number of sentences to overlap between chunks.
+
+
+    """
     def __init__(self,
                  n_chunks: Optional[int] = None,
                  n_sents_per_chunk: Optional[int] = None,
                  n_sents_overlap: int = 0):
-        """
-        n_sents_per_chunk and n_chunks are mutually exclusive.
-        If both are provided, n_sents_per_chunk will be ignored.
-        n_chunks is only an approximation and may not be exact.
-        """
         if not n_sents_per_chunk and not n_chunks:
             raise ValueError("Either n_sents_per_chunk or n_chunks should be provided.")
-
         self.n_chunks = n_chunks
         self.n_sents_per_chunk = n_sents_per_chunk
         self.n_sents_overlap = n_sents_overlap
@@ -61,7 +106,6 @@ class PositionalChunker(BaseChunker):
             n_sents_overlap = 0
         assert n_sents_per_chunk > n_sents_overlap, "n_sents_per_chunk should be greater than n_sents_overlap"
 
-
         sent_ids = list(range(len(doc)))
         end = len(sent_ids)-n_sents_overlap
         step = n_sents_per_chunk-n_sents_overlap
@@ -69,27 +113,39 @@ class PositionalChunker(BaseChunker):
         return self._convert_chunks_to_dict(chunks, doc_id)
 
 
+
 class SingleLinkageChunker(BaseChunker):
+    """
+    SingleLinkageChunker splits documents into chunks using single linkage clustering.
+    Unlike most other chunkers, SingleLinkageChunker does NOT require consecutive sentences to be in the same chunk.
+    Nonetheless, positional distance is considered in the clustering process.
+
+    Attributes:
+        lamda (float): The weight of positional distance.
+        n_clusters (Optional[int]): The number of clusters to split the document into.
+        max_samples_per_cluster (Optional[int]): The maximum number of sentences per cluster.
+            Note: max_samples_per_cluster and n_clusters are mutually exclusive.
+            If both are provided, max_samples_per_cluster will be ignored.
+            n_clusters is only an approximation and may not be exact.
+        distance_threshold (float): The distance threshold for merging clusters.
+        dataset (str): The name of the dataset for precomputed embeddings.
+    """
     def __init__(self,
                  lamda: float = 0.5,
                  n_clusters: Optional[int] = None,
                  max_samples_per_cluster: Optional[int] = None,
                  distance_threshold: Optional[float] = 0.5,
-                 dataset: str = None):
-        """
-        max_samples_per_cluster and n_clusters are mutually exclusive.
-        If both are provided, max_samples_per_cluster will be ignored.
-        n_clusters is only an approximation and may not be exact.
-        """
+                 dataset: Optional[str] = None):
         if not max_samples_per_cluster and not n_clusters:
             raise ValueError("Either max_samples_per_cluster or n_clusters should be provided.")
-
         self.lamda = lamda
         self.n_clusters = n_clusters
         self.max_samples_per_cluster = max_samples_per_cluster
         self.distance_threshold = distance_threshold
         self.dataset = dataset
         if self.dataset is None:
+            # only load the encoder if the dataset is not provided
+            # this avoids unnecessary OOM
             self.encoder = Encoder()
 
     def chunk(self, doc: List[str], doc_id: int = 0):
