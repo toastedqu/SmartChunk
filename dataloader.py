@@ -1,475 +1,298 @@
 import os
-import sys
+import re
 import yaml
 import json
-import random
-import logging
-import itertools
-import pandas as pd
+import traceback
 from typing import *
-from utils import *
 from tqdm import tqdm
-from datasets import load_dataset
 from bs4 import BeautifulSoup
-from encoder import CustomEncoder
+from utils import setup_logger, split_sentences
+from datasets import load_dataset
 from joblib import Parallel, delayed
-from beir import util
-from beir.datasets.data_loader import GenericDataLoader
-random.seed(2)
-logger = logging.Logger(__name__)
-logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.StreamHandler(sys.stdout))
-
-# how many short documents should be combined into a long document for synthetic data
-avg_n_short_per_doc = {
-    "nfcorpus": 10,
-    "nq": 20,
-    "webis-touche2020": 5,
-    "scidocs": 10,
-    "scifact": 10,
-    "miracl": 25,
-    "bioasq": 10,
-}
-
-# the following datasets were unused.
-# "hotpotqa": 25,
-# "fiqa": 15,
-# "quora": 100,
-# "dbpedia-entity": 25,
-# "fever": 25,
-# "climate-fever": 25,
-
-
 
 ###### helper functions ######
-def qrels_tsv_to_dict(qrels: pd.DataFrame):
-    """Convert the qrels tsv dataframe to a dictionary.
-
-    Args:
-        qrels (pd.DataFrame): The qrels dataframe. It should have the following 3 columns: query_id, doc_id, score.
-
-    Returns:
-        Dict: The qrels dictionary.
-    """
-    qrels_dict = {}
-    for query_id in qrels['query_id']:
-        rows = qrels[(qrels['query_id'] == query_id) & (qrels['score'] == 1)]
-        qrels_dict[query_id] = dict(zip(rows['doc_id'], rows['score']))
-    return qrels_dict
-
-
 def is_processed(dataset: str):
-    """Check if the dataset has been processed before.
+    """Check if the dataset is already processed.
 
-    A processed dataset satisfies the following conditions:
-    - It consists of 3 files in the BEIR format: corpus, queries, and qrels.
-    - The corpus meets the long document requirement.
-    - All 3 files are subsets with a maximum of 100 queries.
+    "Processed" means the raw dataset has been converted into 4 files:
+    - queries.json: The queries dictionary.
+    - answers.json: The answers dictionary.
+    - docs.json: The docs list.
+    - evidence.json: The evidence dictionary.
 
     Args:
         dataset (str): The dataset name.
 
-    Returns
-        bool: True if the dataset has been processed before, False otherwise.
+    Returns:
+        bool: True if the dataset is already processed, False otherwise.
     """
-    corpus_exists = os.path.exists(f"subsets/{dataset}/corpus.json")
-    queries_exists = os.path.exists(f"subsets/{dataset}/queries.json")
-    qrels_exists = os.path.exists(f"subsets/{dataset}/qrels.json")
-    return corpus_exists and queries_exists and qrels_exists
+    queries_exists = os.path.exists(f"datasets/{dataset}/queries.json")
+    answers_exists = os.path.exists(f"datasets/{dataset}/answers.json")
+    docs_exists = os.path.exists(f"datasets/{dataset}/docs.json")
+    evidence_exists = os.path.exists(f"datasets/{dataset}/evidence.json")
+    return queries_exists and answers_exists and docs_exists and evidence_exists
 
-
-def get_subset(corpus, queries, qrels, subset_size = 100):
-    """Get a subset of the BEIR-formatted dataset.
+def save_processed_data(queries, answers, docs, evidence, dataset: str):
+    """Save the processed data.
 
     Args:
-        corpus (Dict): The corpus dictionary.
         queries (Dict): The queries dictionary.
-        qrels (Dict): The qrels dictionary.
-        subset_size (int): The number of queries in the subset.
-
-    Returns:
-        Tuple[Dict, Dict, Dict]: The subset of corpus, queries, and qrels.
-    """
-    logger.info("Getting subset of queries and qrels...")
-    if len(queries) > subset_size:
-        query_ids = random.sample(list(queries.keys()), subset_size)
-        queries_subset = {query_id: queries[query_id] for query_id in query_ids}
-        qrels_subset = {query_id: {doc_id: score for doc_id, score in qrels[query_id].items() if score > 0} for query_id in query_ids}
-    else:
-        queries_subset = queries
-        qrels_subset = {query_id: {doc_id: score for doc_id, score in qrels[query_id].items() if score > 0} for query_id in queries}
-
-    logger.info("Getting subset of corpus...")
-    pos_doc_ids = set([doc_id for qrel in qrels_subset.values() for doc_id in qrel if qrel[doc_id] > 0])
-    neg_doc_ids = [doc_id for doc_id in corpus if doc_id not in pos_doc_ids]
-
-    # ensure the number of negative docs is at most 3 times the number of positive docs
-    if len(neg_doc_ids) > 3*len(pos_doc_ids):
-        neg_doc_ids = random.sample(neg_doc_ids, 3*len(pos_doc_ids))
-
-    corpus_subset = {doc_id: corpus[doc_id] for doc_id in (list(pos_doc_ids) + neg_doc_ids)}
-    return corpus_subset, queries_subset, qrels_subset
-
-
-def save_subset(corpus, queries, qrels, dataset: str):
-    """Save the subset of the BEIR-formatted dataset.
-
-    Args:
-        corpus (Dict): The corpus dictionary.
-        queries (Dict): The queries dictionary.
-        qrels (Dict): The qrels dictionary.
+        answers (Dict): The answers dictionary.
+        docs (List): The docs list.
+        evidence (Dict): The evidence dictionary.
         dataset (str): The dataset name.
     """
-    if not is_processed(dataset):
-        corpus_subset, queries_subset, qrels_subset = get_subset(corpus, queries, qrels)
-        if not os.path.exists("subsets"): os.mkdir("subsets")
-        if not os.path.exists(f"subsets/{dataset}"): os.mkdir(f"subsets/{dataset}")
-        json.dump(corpus_subset, open(f"subsets/{dataset}/corpus.json", "w"))
-        json.dump(queries_subset, open(f"subsets/{dataset}/queries.json", "w"))
-        json.dump(qrels_subset, open(f"subsets/{dataset}/qrels.json", "w"))
+    if not os.path.exists("datasets"):              os.mkdir("datasets")
+    if not os.path.exists(f"datasets/{dataset}"):   os.mkdir(f"datasets/{dataset}")
+    json.dump(queries,  open(f"datasets/{dataset}/queries.json", "w"))
+    json.dump(answers,  open(f"datasets/{dataset}/answers.json", "w"))
+    json.dump(docs,     open(f"datasets/{dataset}/docs.json", "w"))
+    json.dump(evidence, open(f"datasets/{dataset}/evidence.json", "w"))
 
-
-def save_corpus_embeddings(corpus, dataset: str, encoder: CustomEncoder):
-    """Save the embeddings of the corpus documents.
-
-    Args:
-        corpus (Dict): The corpus dictionary.
-        dataset (str): The dataset name.
-        encoder (CustomEncoder): The encoder used for encoding the documents.
-    """
-    i = 0       # document index, used as embedding filename
-    m = {}      # mapping from doc_id to embedding filename
-
-    logger.info(f"Saving {encoder.name} embeddings for {dataset}...")
-    for doc_id, doc_dict in tqdm(corpus.items()):
-        doc = join_title_text(doc_dict)
-        sents = split_sentences(doc)
-        embs = encoder.encode_queries(sents)
-        if not os.path.exists("embeddings"): os.mkdir("embeddings")
-        if not os.path.exists(f"embeddings/{dataset}"): os.mkdir(f"embeddings/{dataset}")
-        if not os.path.exists(f"embeddings/{dataset}/{encoder.name}"): os.mkdir(f"embeddings/{dataset}/{encoder.name}")
-        if not os.path.exists(f"embeddings/{dataset}/{encoder.name}/{str(i)}.npy"): np.save(f"embeddings/{dataset}/{encoder.name}/{str(i)}.npy", embs)
-        m[doc_id] = i
-        i += 1
-    json.dump(m, open(f"embeddings/{dataset}/{encoder.name}/docids.json", "w"))
-
-
-def load_processed(dataset: str, is_subset: bool = True):
-    """Load the processed BEIR-formatted dataset.
+def load_processed_data(dataset: str):
+    """Load the processed data.
 
     Args:
         dataset (str): The dataset name.
-        is_subset (bool): Whether to load the subset or the full dataset.
 
     Returns:
-        Tuple[Dict, Dict, Dict]: The processed corpus, queries, and qrels dictionaries.
+        Tuple[Dict, Dict, Dict, Dict]: The queries, answers, docs, and evidence dictionaries.
     """
-    folder = "subsets" if is_subset else "datasets"
-    return json.load(open(f"{folder}/{dataset}/corpus.json", 'r')), json.load(open(f"{folder}/{dataset}/queries.json", 'r')), json.load(open(f"{folder}/{dataset}/qrels.json", 'r'))
-
-
-def augment_corpus(corpus, n_short_per_long = 10):
-    """Augment the corpus by concatenating multiple short documents into a single long document.
-
-    Args:
-        corpus (Dict): The corpus dictionary.
-        n_short_per_long (int): The number of short documents to combine into a long document.
-
-    Returns:
-        Dict: The augmented corpus dictionary.
-    """
-    corpus_augmented = {}
-    short_doc_ids, short_docs = [], []
-    long_doc_ids, long_docs = [], []
-    counter = 0
-
-    # ensure randomness in the order of short documents.
-    keys = list(corpus.keys())
-    random.shuffle(keys)
-
-    logger.info("Augmenting corpus...")
-    for doc_id in tqdm(keys):
-        try:
-            doc = corpus[doc_id]
-            counter += 1
-            short_doc_ids.append(doc_id)
-            short_docs.append(join_title_text(doc))
-        except:
-            continue
-
-        # when we have n_short_per_long short documents, we create a long document
-        if counter == n_short_per_long:
-            long_doc_id = "|".join(short_doc_ids)
-            long_doc = "\n".join(short_docs)
-            long_doc_ids.append(long_doc_id)
-            long_docs.append(long_doc)
-
-            # reset cache
-            short_doc_ids, short_docs = [], []
-            counter = 0
-
-    # if there are leftover short documents, create a long document with them alone.
-    if counter != 0:
-        long_doc_id = "|".join(short_doc_ids)
-        long_doc = "\n".join(short_docs)
-        long_doc_ids.append(long_doc_id)
-        long_docs.append(long_doc)
-
-    # create new corpus with long documents
-    for long_doc_id, long_doc in zip(long_doc_ids, long_docs):
-        corpus_augmented[long_doc_id] = {"text": long_doc}
-    return corpus_augmented
-
-
-def modify_qrels(qrels, corpus_augmented):
-    """Modify the qrels to match the long documents in the augmented corpus.
-
-    The input qrels matches query_ids to doc_ids and relevance scores, for the short documents.
-    The output qrels matches query_ids to doc_ids and relevance scores, for the long documents.
-
-    Args:
-        qrels (Dict): The qrels dictionary.
-        corpus_augmented (Dict): The augmented corpus dictionary.
-
-    Returns:
-        Dict: The modified qrels dictionary.
-    """
-    logger.info("Generating short-long map...")
-    short_long_map = {short_doc_id: long_doc_id for long_doc_id in tqdm(corpus_augmented) for short_doc_id in long_doc_id.split("|")}
-
-    logger.info("Modifying qrels...")
-    qrels_modified = {}
-    for query_id, qrel in tqdm(qrels.items()):
-        qrels_modified[query_id] = {}
-        for doc_id, score in qrel.items():
-            if short_long_map[doc_id] not in qrels_modified[query_id]:
-                qrels_modified[query_id][short_long_map[doc_id]] = score
-            else:
-                qrels_modified[query_id][short_long_map[doc_id]] = max(qrels_modified[query_id][short_long_map[doc_id]], score)
-
-    return qrels_modified
+    queries =   json.load(open(f"datasets/{dataset}/queries.json", 'r'))
+    answers =   json.load(open(f"datasets/{dataset}/answers.json", 'r'))
+    docs =      json.load(open(f"datasets/{dataset}/docs.json", 'r'))
+    evidence =  json.load(open(f"datasets/{dataset}/evidence.json", 'r'))
+    return queries, answers, docs, evidence
 
 
 
 ###### dataloaders ######
-def load_beir(dataset: str, split: str = "test"):
-    """Load the dataset from BEIR.
+def convert_ragbench_sents_to_tups(doc_sentences):
+    """Convert the RAGBench sentences to tuples.
+
+    In RAGBench, the sentences of each document are represented as a list of lists.
+    Each inner list contains the sentence ID and the sentence text.
+    Each sentence ID is labeled in the format: "{doc_id}{sent_id}".
+    `doc_id` is numerical, whereas `sent_id` is alphabetical.
+    `cache_alpha_to_num` is used to map the sentence ID to a numerical index for ease of use.
+
+    Args:
+        doc_sentences (List): The list of sentences in the document.
+
+    Returns:
+        List[Tuple[int, str]]: The list of sentence tuples, where each tuple contains the sentence index and the sentence text.
+        Dict[str, int]: The mapping from alphabetical sentence ID to numerical index.
+    """
+    doc_repr_list = []          # store a new representation of the document
+    cache_alpha_to_num = {}     # store a mapping from alphabetical sentence ID to numerical index
+
+    for sent_idx, sentence in enumerate(doc_sentences):
+        temp_sent = sentence.tolist()
+        sent_id = re.sub(r'\d+', '', temp_sent[0])
+        sent = ' '.join(temp_sent[1].split()).strip()
+        doc_repr_list.append(tuple([sent_idx, sent]))
+        cache_alpha_to_num[sent_id] = sent_idx
+
+    return doc_repr_list, cache_alpha_to_num
+
+def load_ragbench(dataset: str):
+    """Load the RAGBench dataset.
+
+    Source: https://huggingface.co/datasets/rungalileo/ragbench
+
+    In RAGBench, there is no corpus. Instead, a list of documents is provided for each query.
+    There can be duplicate documents across queries.
+    Each document is already split into sentences.
+    To create a corpus representation, we need to assign unique document IDs (i.e., indexes).
+    The evidence is provided as a list of sentence IDs.
 
     Args:
         dataset (str): The dataset name.
-        split (str): The dataset split to load.
 
     Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
+        Dict[str, str]: A mapping from query ID to query text.
+        Dict[str, str]: A mapping from query Id to answer text.
+        List[List[str]]: A list of documents, where each document is a list of sentences.
+        Dict[str, Dict[str, List[int]]]: A mapping from query ID to evidence dictionary,
+            where each evidence dictionary maps document ID to a list of sentence IDs.
     """
-    # load BEIR dataset
-    url = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/{}.zip".format(dataset)
-    data_path = util.download_and_unzip(url, "datasets")
-    corpus, queries, qrels = GenericDataLoader(data_folder=data_path).load(split=split)
+    df = load_dataset("rungalileo/ragbench", dataset, split="test").to_pandas()
+    df = df[df['all_relevant_sentence_keys'].apply(lambda x: len(x) > 0)]   # remove queries with no evidence
+    df = df.drop_duplicates(subset=['id'])                                  # remove duplicate queries
+    df.sort_values(by='id', inplace=True)                                   # sort by ID to ensure consistency
 
-    # augment the corpus by concatenating multiple short documents into a single long document
-    if dataset in avg_n_short_per_doc:
-        corpus_augmented = augment_corpus(corpus, n_short_per_long=avg_n_short_per_doc[dataset])
-    else:
-        corpus_augmented = augment_corpus(corpus)
+    # initialize the return variables
+    queries = {}
+    answers = {}
+    docs = []
+    evidence = {}
 
-    # modify the qrels to match the long documents in the augmented corpus
-    qrels_modified = modify_qrels(qrels, corpus_augmented)
+    # keep track of unique documents and their assigned IDs
+    doc_to_id = {}
+    doc_id_counter = 0
 
-    return corpus_augmented, queries, qrels_modified
+    # iterate through each row of the dataframe
+    for _, row in df.iterrows():
+        query_id = row['id']
+        query = row['question']
+        answer = row['response']
+        documents_sentences = row['documents_sentences']
+        relevant_sentence_keys = row['all_relevant_sentence_keys']
 
+        # map query ID to query text and answer text
+        queries[query_id] = query
+        answers[query_id] = answer
 
-def load_mldr():
-    """Load the MLDR dataset.
+        # initialize evidence for this query
+        evidence[query_id] = {}
 
-    Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
-    """
-    # load MLDR dataset
-    dataset = 'Shitao/MLDR'
-    queries = load_dataset(dataset, 'en', split='test', trust_remote_code=True)
-    corpus = load_dataset(dataset, f'corpus-en', split='corpus', trust_remote_code=True)
+        # process each document
+        for doc_idx, doc_sentences in enumerate(documents_sentences):
+            # get the list of sentences for the current document
+            doc_sentences = documents_sentences[doc_idx].tolist()
 
-    # convert the dataset to the BEIR format
-    corpus_beir = {doc['docid']: {'text': doc['text']} for doc in corpus}
-    queries_beir = {query['query_id']: query['query'] for query in queries}
-    qrels_beir = {}
-    for query_info in queries:
-        qrels_beir[query_info['query_id']] = {}
-        for positive_passage in query_info['positive_passages']:
-            qrels_beir[query_info['query_id']][positive_passage['docid']] = 1
-        for negative_passage in query_info['negative_passages']:
-            qrels_beir[query_info['query_id']][negative_passage['docid']] = 0
+            # Create a unique representation of the document to avoid duplicates
+            doc_repr_list, cache_alpha_to_num = convert_ragbench_sents_to_tups(doc_sentences)
 
-    return corpus_beir, queries_beir, qrels_beir
+            # tuple representation of the document as the key for the doc_to_id dictionary
+            doc_repr = tuple(doc_repr_list)
 
+            # if this document has not been assigned a unique ID, assign it
+            if doc_repr not in doc_to_id:
+                doc_to_id[doc_repr] = doc_id_counter
+                docs.append([tup[1] for tup in doc_repr_list])
+                doc_id_counter += 1
 
-def load_msmarco():
-    """Load the MSMARCO dataset.
+            # get the assigned document ID
+            doc_id = doc_to_id[doc_repr]
 
-    Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
-    """
-    logger.info("Processing msmarco queries...")
-    queries = pd.read_csv("datasets/msmarco/msmarco-docdev-queries.tsv", sep='\t', names=['query_id', 'query'])
-    queries_dict = dict(zip(queries['query_id'], queries['query']))
-    json.dump(queries_dict, open("datasets/msmarco/queries.json", "w"))
+            # initialize the evidence for this document
+            evidence[query_id][doc_id] = []
 
-    logger.info("Processing msmarco qrels...")
-    qrels = pd.read_csv("datasets/msmarco/msmarco-docdev-qrels.tsv", sep=' ', names=['query_id', 'iter', 'doc_id', 'score'])
-    qrels_dict = qrels_tsv_to_dict(qrels)
-    json.dump(qrels_dict, open("datasets/msmarco/qrels.json", "w"))
+            # process evidence sentence IDs for this document
+            for sentence_id in relevant_sentence_keys:
+                # check if the sentence ID is from this document
+                if any(sentence_id == sent[0] for sent in doc_sentences):
+                    # add a tuple of (document ID, sentence ID) to the evidence list
+                    evidence[query_id][doc_id].append(cache_alpha_to_num[sentence_id.replace(str(doc_idx), '')])
 
-    logger.info("Processing msmarco corpus...")
-    corpus_dict = {}
-    with open("datasets/msmarco/msmarco-docs.tsv") as f:
-        for line in tqdm(f.readlines()):
-            doc_id, _, _, text = line.split('\t')
-            doc_id = doc_id.strip()
-            text = text.strip()
-            corpus_dict[doc_id] = {'text': text}
-    json.dump(corpus_dict, open("datasets/msmarco/corpus.json", "w"))
+            # remove the document ID if there is no evidence
+            if evidence[query_id][doc_id] == []:
+                del evidence[query_id][doc_id]
 
-    return corpus_dict, queries_dict, qrels_dict
-
-
-def load_miracl():
-    """Load the MIRACL dataset.
-
-    Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
-    """
-    logger.info("Processing miracl queries...")
-    queries = pd.read_csv('datasets/miracl/topics.miracl-v1.0-en-train.tsv', sep='\t', names=['query_id', 'query'])
-    queries_dict = dict(zip(queries['query_id'], queries['query']))
-    json.dump(queries_dict, open("datasets/miracl/queries.json", "w"))
-
-    logger.info("Processing miracl qrels...")
-    qrels = pd.read_csv('datasets/miracl/qrels.miracl-v1.0-en-train.tsv', sep='\t', names=['query_id', 'iter', 'doc_id', 'score'])
-    qrels_dict = qrels_tsv_to_dict(qrels)
-    json.dump(qrels_dict, open("datasets/miracl/qrels.json", "w"))
-
-    logger.info("Processing miracl corpus...")
-    corpus = load_dataset('miracl/miracl-corpus', 'en', trust_remote_code=True)
-    corpus_dict = {d['docid']: {'title': d['title'], 'text': d['text']} for d in tqdm(corpus['train'])}
-    json.dump(corpus_dict, open("datasets/miracl/corpus.json", "w"))
-
-    # augment the corpus by concatenating multiple short documents into a single long document
-    corpus_augmented = augment_corpus(corpus_dict, n_short_per_long=avg_n_short_per_doc['miracl'])
-
-    # modify the qrels to match the long documents in the augmented corpus
-    qrels_modified = modify_qrels(qrels_dict, corpus_augmented)
-
-    return corpus_augmented, queries, qrels_modified
-
-
-def load_conditionalqa():
-    """Load the ConditionalQA dataset.
-
-    Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
-    """
-    logger.info("Processing conditionalqa corpus...")
-    documents = json.load(open('datasets/conditionalqa/documents.json','r'))
-    corpus = {doc['url'].split('/')[-1]: {
-        "title": doc['title'],
-        "text": ' '.join([BeautifulSoup(sent, "html.parser").get_text() for sent in doc['contents']])
-    } for doc in documents}
-    json.dump(corpus, open("datasets/conditionalqa/corpus.json", "w"))
-
-    logger.info("Processing conditionalqa queries and qrels...")
-    qas = json.load(open('datasets/conditionalqa/train.json','r'))
-    qas += json.load(open('datasets/conditionalqa/dev.json','r'))
-    qas += json.load(open('datasets/conditionalqa/test_no_answer.json','r'))
-    queries, qrels = {}, {}
-    for qa in qas:
-        doc_id = qa['url'].split('/')[-1]
-        if doc_id in corpus:
-            query_id = qa['id']
-            queries[query_id] = qa['scenario'] + '\n' + qa['question']
-            qrels[query_id] = qrels.get(query_id, {})
-            qrels[query_id][doc_id] = 1
-    json.dump(queries, open("datasets/conditionalqa/queries.json", "w"))
-    json.dump(qrels, open("datasets/conditionalqa/qrels.json", "w"))
-
-    return corpus, queries, qrels
-
-
-def load_bioasq():
-    """Load the BioASQ dataset.
-
-    Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
-    """
-    logger.info("Processing bioasq corpus...")
-    documents = json.load(open('datasets/bioasq/allMeSH_2020.json', 'r', encoding='Latin-1'))
-    corpus = {article['pmid']: {'text': article['abstractText']} for article in tqdm(documents['articles'])}
-    json.dump(corpus, open("datasets/bioasq/corpus.json", "w"))
-
-    logger.info("Processing bioasq queries and qrels...")
-    data = json.load(open('datasets/bioasq/training8b.json','r'))['questions']
-    for i in range(1,6):
-        data += json.load(open(f'datasets/bioasq/Task8BGoldenEnriched/8B{i}_golden.json','r'))['questions']
-    queries, qrels = {}, {}
-    for item in data:
-        query_id = item['id']
-        queries[query_id] = item['body']
-        qrels[query_id] = {}
-        for url in item['documents']:
-            doc_id = url.split('/')[-1]
-            if doc_id in corpus:
-                qrels[query_id][doc_id] = 1
-    json.dump(queries, open("datasets/bioasq/queries.json", "w"))
-    json.dump(qrels, open("datasets/bioasq/qrels.json", "w"))
-
-    # augment the corpus by concatenating multiple short documents into a single long document
-    corpus_augmented = augment_corpus(corpus, n_short_per_long=avg_n_short_per_doc['bioasq'])
-
-    # modify the qrels to match the long documents in the augmented corpus
-    qrels_modified = modify_qrels(qrels, corpus_augmented)
-
-    return corpus_augmented, queries, qrels_modified
-
+    return queries, answers, docs, evidence
 
 def load_qasper():
     """Load the QASPER dataset.
 
-    Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
-    """
-    dataset = load_dataset("allenai/qasper")
-    corpus, queries, qrels = {}, {}, {}
-    for split in {'train','validation','test'}:
-        for sample in tqdm(dataset[split]):
-            curr_doc = '\n\n'.join(['\n\n'.join(paragraph) for paragraph in sample['full_text']['paragraphs']]).strip()
-            if curr_doc:
-                doc_id = sample['id'] + "_d"
-                query_id = sample['id'] + "_q"
-                corpus[doc_id] = {"text": curr_doc}
-                queries[query_id] = sample['title']
-                qrels[query_id] = {doc_id: 1}
-    return corpus, queries, qrels
+    Source: https://huggingface.co/datasets/allenai/qasper
 
-
-def load_lethain():
-    """Load the Lethain dataset provided by Ofer.
+    In QASPER, the documents are provided as a list of sections and paragraphs.
+    There are multiple questions for each document.
+    The answers are provided as free-form text.
+    The evidence is provided as a list of sentences.
+    To match the format of the other datasets, we process the evidence to map to a list of sentence IDs.
 
     Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
+        Dict[str, str]: A mapping from query ID to query text.
+        Dict[str, str]: A mapping from query Id to answer text.
+        List[List[str]]: A list of documents, where each document is a list of sentences.
+        Dict[str, Dict[str, List[int]]]: A mapping from query ID to evidence dictionary,
+            where each evidence dictionary maps document ID to a list of sentence IDs.
     """
-    corpus, queries, qrels = {}, {}, {}
-    for i,filename in tqdm(enumerate(os.listdir('datasets/lethain/text-files'))):
-        query = filename.replace('https-infraeng-dev-','').replace('https-lethain-com-','').replace('.txt','').replace('-',' ')
-        with open(f'datasets/lethain/text-files/{filename}', 'r') as f:
-            text = f.read()
-        queries[str(i)] = query
-        corpus[str(i)] = {'text': text}
-        qrels[str(i)] = {str(i): 1}
-    return corpus, queries, qrels
+    # initialize the return variables
+    queries = {}
+    answers = {}
+    docs = []
+    evidence = {}
 
+    # load the QASPER dataset
+    dataset = load_dataset("allenai/qasper", split='test')
 
+    # iterate through each row of the dataset
+    for doc_id, row in tqdm(enumerate(dataset)):
+        # get the full academic paper text
+        doc = row['abstract']
+        for section in row['full_text']['paragraphs']:
+            for paragraph in section:
+                doc += '/n/n'
+                doc += paragraph
+        sents = split_sentences(doc)
+        docs.append(sents)
 
-###### MAIN FUNCTION ######
+        # process each question-answer pair for this document
+        for i, question in enumerate(row['qas']['question']):
+            query_id = row['qas']['question_id'][i]
+            answer = row['qas']['answers'][i]['answer'][0]
+            if answer['unanswerable'] or answer['free_form_answer'].strip() == '':
+                continue
+            queries[query_id] = question.strip().replace('?','') + " in " + row['title'] + '?'
+            answers[query_id] = answer['free_form_answer']
+
+            # process the evidence for this question
+            evidence[query_id] = {}
+            evidence[query_id][str(doc_id)] = []
+            evidence_sents = set(split_sentences('\n'.join(answer['evidence'])))
+            for sent_id, sent in sents:
+                if sent in evidence_sents:
+                    evidence[query_id][str(doc_id)].append(sent_id)
+
+    return queries, answers, docs, evidence
+
+def load_conditionalqa():
+    """Load the ConditionalQA dataset.
+
+    Source: https://haitian-sun.github.io/conditionalqa/
+
+    In ConditionalQA, the documents are provided in the HTML format.
+
+    Returns:
+        Dict[str, str]: A mapping from query ID to query text.
+        Dict[str, str]: A mapping from query Id to answer text.
+        List[List[str]]: A list of documents, where each document is a list of sentences.
+        Dict[str, Dict[str, List[int]]]: A mapping from query ID to evidence dictionary,
+            where each evidence dictionary maps document ID to a list of sentence IDs.
+    """
+    # initialize the return variables
+    queries = {}
+    answers = {}
+    docs = []
+    evidence = {}
+
+    # keep track of unique documents and their assigned IDs
+    url_to_id = {}
+
+    # load and process the original documents to the desired format
+    docs_original = json.load(open('datasets/conditionalqa/original/documents.json','r'))
+    for i,doc in tqdm(enumerate(docs_original), total=len(docs_original)):
+        url_id = doc['url'].split('/')[-1]
+        url_to_id[url_id] = i
+        doc_new = doc['title']+'\n'+'\n'.join([BeautifulSoup(sent, "html.parser").get_text() for sent in doc['contents']])
+        sents = split_sentences(doc_new)
+        docs.append(sents)
+
+    # load and process the original questions and answers to the desired format
+    qas = json.load(open('datasets/conditionalqa/original/dev.json','r'))
+    for qa in tqdm(qas, total=len(qas)):
+        if qa['not_answerable']: continue                           # skip the questions with no answer
+        url_id = qa['url'].split('/')[-1]
+        if url_id not in url_to_id: continue                        # skip the questions with no matching document
+        doc_id = url_to_id[url_id]
+        curr_sents = docs[doc_id]
+        query_id = qa['id']
+        queries[query_id] = qa['scenario'] + '\n' + qa['question']  # concatenate the scenario and question
+        answers[query_id] = qa['answers'][0][0]                     # get the first answer as the answer
+
+        # process the evidence for this question
+        evidence[query_id] = evidence.get(query_id, {})
+        evidence[query_id][str(doc_id)] = evidence[query_id].get(str(doc_id), [])
+        processed_evidence = set(split_sentences('\n'.join([BeautifulSoup(sent, "html.parser").get_text() for sent in qa['evidences']])))
+        for sent_id, sent in enumerate(curr_sents):
+            if sent in processed_evidence:
+                evidence[query_id][str(doc_id)].append(sent_id)
+
+    return queries, answers, docs, evidence
+
 def load_data(dataset: str):
     """Load the dataset.
 
@@ -477,45 +300,40 @@ def load_data(dataset: str):
         dataset (str): The dataset name.
 
     Returns:
-        Tuple[Dict, Dict, Dict]: The corpus, queries, and qrels dictionaries.
+        Tuple[Dict, Dict, Dict, Dict]: The queries, answers, docs, and evidence dictionaries.
     """
-    logger.info(f"Loading {dataset}...")
-    # load the processed dataset if it exists
+    # if the dataset is processed, load the processed data
     if is_processed(dataset):
-        return load_processed(dataset)
+        return load_processed_data(dataset)
 
-    # load the dataset from BEIR
-    elif dataset in {'nfcorpus', 'nq', 'hotpotqa', 'fiqa', 'quora', 'webis-touche2020', 'dbpedia-entity', 'scidocs', 'fever', 'climate-fever', 'scifact'}:
-        return load_beir(dataset)
+    # if the dataset is not processed and comes from ragbench, process it from ragbench
+    if dataset in {'cuad', 'delucionqa', 'emanual', 'expertqa', 'msmarco', 'pubmedqa', 'covidqa', 'hagrid', 'hotpotqa', 'techqa'}:
+        return load_ragbench(dataset)
+    elif dataset == "qasper":
+        return load_qasper()
+    elif dataset == "conditionalqa":
+        return load_conditionalqa()
 
-    # load custom dataset
-    else:
-        return eval(f"load_{dataset}")()
-
-
-def precompute_embeddings(dataset, encoder_name, device):
-    """Precompute the embeddings for the dataset using the specified encoder.
+###### MAIN FUNCTION ######
+def load_and_save(dataset: str):
+    """Load and save the dataset.
 
     Args:
         dataset (str): The dataset name.
-        encoder_name (str): The encoder name.
-        device (str): The device to use for encoding.
     """
-    # if the dataset is not processed yet, process and save the subset
-    if not is_processed(dataset):
-        corpus, queries, qrels = load_data(dataset)
-        save_subset(corpus, queries, qrels, dataset)
-
-    # load the processed dataset
-    corpus, _, _ = load_processed(dataset)
-
-    # save the embeddings
-    save_corpus_embeddings(corpus, dataset, CustomEncoder(encoder_name, device))
-
+    logger = setup_logger()
+    try:
+        logger.info(f"Loading {dataset}...")
+        queries, answers, docs, evidence = load_data(dataset)
+        logger.info(f"Saving {dataset}...")
+        save_processed_data(queries, answers, docs, evidence, dataset)
+    except Exception as e:
+        logger.info(f"Error occurred for dataset {dataset}: {e}")
+        traceback.print_exc()
 
 
+
+# Executing this script will load the datasets and save the processed data.
 if __name__ == "__main__":
-    # If the script is executed, precompute the embeddings for all datasets and encoders in the config file
     cfg = yaml.load(open("config.yaml", "r"), Loader=yaml.FullLoader)
-    cfgs = [dict(zip(["dataset", "encoder_name"], v)) for v in itertools.product(cfg['datasets'], cfg['encoders'])]
-    Parallel(n_jobs=4)(delayed(precompute_embeddings)(**cfg, device=f"cuda:{i%4}") for i, cfg in enumerate(cfgs))
+    Parallel(n_jobs=4)(delayed(load_and_save)(dataset=dataset) for dataset in cfg['datasets'])

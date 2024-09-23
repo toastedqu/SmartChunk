@@ -321,8 +321,11 @@ cython_debug/
 draft*
 old/
 acquired_ms.txt
-results_old/
-dataloader_old.py
 results/
+embeddings_old/
 embeddings/
+chunkers copy/
 subsets/
+document_retrieval/
+generation/
+eda.ipynb
