@@ -2,7 +2,7 @@
 In addition to `dunzhang/stella_en_1.5B_v5`, we experimented on 2 other embedding models on the MTEB benchmark: `BAAI/bge-large-en-v1.5` and `all-mpnet-base-v2`.
 
 ## Document Retrieval
-We present F1@k scores ($\%$) from the 2 embedding models on Document Retrieval. Datasets marked with * are stitched. Rows are sorted by the average number of sentences per document (before stitching) in ascending order for easier comparison.
+We present F1@k scores (%) from the 2 embedding models on Document Retrieval. Datasets marked with * are stitched. Rows are sorted by the average number of sentences per document (before stitching) in ascending order for easier comparison.
 
 ### BAAI/bge-large-en-v1.5
 **k=1**:
