@@ -13,12 +13,12 @@ We present F1@k scores (%) from the 2 embedding models on Document Retrieval. Da
 | NQ*           | 81.59      | **85.62**      | 81.60      |
 | Scidocs*      | 6.37       | 7.62       | **8.03**       |
 | Scifact*      | 44.02      | **51.98**      | 46.58      |
-| BioASQ*       | 40.68      | **44.00**      | 38.75      |
+| BioASQ*       | 48.36      | **52.56**      | 45.83      |
 | NFCorpus*     | 10.35      | 11.02      | **11.43**      |
 | HotpotQA      | **66.67**      | **66.67**      | **66.67**      |
-| MSMARCO       | **98.00**      | 94.00      | **98.00**      |
-| ConditionalQA | **72.69**      | 71.96      | 71.59      |
-| Qasper        | **88.95**      | 85.98      | 87.60      |
+| MSMARCO       | **95.00**      | **95.00**      | **95.00**      |
+| ConditionalQA | **76.38**      | 74.54      | 76.01      |
+| Qasper        | **92.45**      | 90.84      | 90.84      |
 
 **k=3**:
 
@@ -28,12 +28,12 @@ We present F1@k scores (%) from the 2 embedding models on Document Retrieval. Da
 | NQ*           | 55.03      | **66.53**      | 52.36      |
 | Scidocs*      | 14.13      | 16.39      | **16.80**      |
 | Scifact*      | 37.98      | **52.82**      | 38.38      |
-| BioASQ*       | 49.54      | **52.62**      | 48.14      |
+| BioASQ*       | 61.82     | **62.26**      | 61.53      |
 | NFCorpus*     | 16.36      | 17.56      | **18.53**      |
 | HotpotQA      | **91.43**      | 90.87      | 90.46      |
-| MSMARCO       | **94.65**      | 93.19      | 94.28      |
-| ConditionalQA | **72.63**      | 69.00      | 68.69      |
-| Qasper        | **87.75**      | 85.25      | 86.97      |
+| MSMARCO       | 93.26      | **93.56**      | 92.64      |
+| ConditionalQA | **70.75**      | 68.78      | 67.83      |
+| Qasper        | **89.18**      | 87.62      | 88.65      |
 
 **k=5**:
 
@@ -43,12 +43,12 @@ We present F1@k scores (%) from the 2 embedding models on Document Retrieval. Da
 | NQ*           | 48.34      | **57.05**      | 45.95      |
 | Scidocs*      | 18.06      | 18.47      | **20.49**      |
 | Scifact*      | 29.24      | **45.00**      | 30.36      |
-| BioASQ*       | 47.42      | **56.07**      | 47.72      |
+| BioASQ*       | 61.66      | **66.36**      | 61.39      |
 | NFCorpus*     | 18.77      | **19.79**      | 19.75      |
 | HotpotQA      | **87.36**      | 76.05      | 78.18      |
-| MSMARCO       | **91.46**      | 89.88      | 90.05      |
-| ConditionalQA | **60.46**      | 56.10      | 60.44      |
-| Qasper        | **79.47**      | 78.99      | 79.46      |
+| MSMARCO       | **90.93**      | 90.09      | 89.51      |
+| ConditionalQA | **54.75**      | 54.45      | 54.59      |
+| Qasper        | **81.03**      | 76.33      | 77.15      |
 
 **k=10**:
 
@@ -58,12 +58,12 @@ We present F1@k scores (%) from the 2 embedding models on Document Retrieval. Da
 | NQ*           | 21.34      | **30.81**      | 20.19      |
 | Scidocs*      | 17.19      | **19.89**      | 19.52      |
 | Scifact*      | 19.57      | **31.27**      | 19.91      |
-| BioASQ*       | 42.58      | **54.47**      | 41.28      |
+| BioASQ*       | 54.22      | **62.65**      | 53.35      |
 | NFCorpus*     | 21.73      | 21.73      | **22.27**      |
 | HotpotQA      | **54.24**      | 43.43      | 43.80      |
-| MSMARCO       | **79.51**      | 78.62      | 67.78      |
-| ConditionalQA | **38.04**      | 36.63      | 36.44      |
-| Qasper        | **61.31**      | 47.64      | 51.62      |
+| MSMARCO       | **78.90**      | 76.65      | 68.90      |
+| ConditionalQA | **34.73**      | 33.24      | 33.55      |
+| Qasper        | **58.67**      | 46.86      | 42.97      |
 
 ### all-mpnet-base-v2
 **k=1**:
